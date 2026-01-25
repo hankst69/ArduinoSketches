@@ -1,0 +1,4 @@
+/projects/*
+#/libraries/*
+
+/libraries/ESP32-BLE-*
