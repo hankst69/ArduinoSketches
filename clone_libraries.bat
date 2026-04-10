@@ -7,6 +7,20 @@ echo *** updating libraries ***
 @rem https://github.com/arduino/library-registry/blob/main/FAQ.md#how-can-i-add-a-library-to-library-manager
 set "_ARDUINO_LIBRARIES_DIR=%_ARDUINO_SKETCHES_DIR%\libraries"
 
+
+rem https://github.com/felis/USB_Host_Shield_2.0
+set "_APPLETV_JB_UnoHostLib_DIR=%_ARDUINO_LIBRARIES_DIR%\USB_Host_Shield_2.0"
+if not exist "%_APPLETV_JB_UnoHostLib_DIR%" (
+  call git clone "https://github.com/felis/USB_Host_Shield_2.0.git" "%_APPLETV_JB_UnoHostLib_DIR%"
+  rem now we automatically patch the downloaded usb_host_shield_lib with usb_host_library.patch from checkm8-a5 ...
+  cd /d "%_APPLETV_JB_UnoHostLib_DIR%"
+  call git checkout cd87628af4a693eeafe1bf04486cf86ba01d29b8
+  call git clone "https://github.com/hankst69/checkm8-a5.git" "%_APPLETV_JB_UnoHostLib_DIR%\checkm8-a5"
+  call git apply "%_APPLETV_JB_UnoHostLib_DIR%\checkm8-a5\usb_host_library.patch"
+  rmdir /s /q "%_APPLETV_JB_UnoHostLib_DIR%\checkm8-a5"
+)
+
+
 rem https://github.com/T-vK/ESP32-BLE-Keyboard.git  https://github.com/hankst69/ESP32-BLE-Keyboard.git
 rem https://github.com/T-vK/ESP32-BLE-Mouse.git
 rem https://github.com/T-vK/ESP32-BLE-Gamepad.git
