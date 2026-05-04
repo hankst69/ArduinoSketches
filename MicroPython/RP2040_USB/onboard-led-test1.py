@@ -16,7 +16,7 @@ from machine import Pin
 import time
 
 ONBOARD_LED_GREEN_PIN = 22    #RP2040 USB onBoard LED connected to GPIO pin 22
-ONBOARD_LED_RED_PIN = 23
+ONBOARD_LED_RED_PIN = 25
 
 pin_green = Pin(ONBOARD_LED_GREEN_PIN, Pin.OUT)     # set GPIOX to output
 pin_red = Pin(ONBOARD_LED_RED_PIN, Pin.OUT)     # set GPIOX to output

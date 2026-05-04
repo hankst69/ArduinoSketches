@@ -14,7 +14,7 @@ print(f"HW: {sysinfo._machine} {sysinfo._mpy}")
 print(f"SW: {sysinfo.name} {sysinfo.version}")
 print(f"CPU frequ: {machine.freq()}")
 
-
+#https://docs.micropython.org/en/latest/library/neopixel.html#class-neopixel
 from machine import Pin
 from neopixel import NeoPixel
 import time
