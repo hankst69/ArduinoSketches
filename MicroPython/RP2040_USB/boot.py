@@ -35,18 +35,6 @@ from machine import Pin
 ONBOARD_LED_PIN = 22
 
 
-class Usb0815Keyboard(KeyboardInterface):
-    def __init__(self, led_pin):
-          self.led_pin = led_pin
-          super().__init__()
-      
-    def send_key(self, key=None):
-        super().send_key(key)
-        self.led_pin.value(0)  #led on means to set output to low
-        time.sleep_ms(50)
-        self.led_pin.value(1)  #led off means to set output to high
-
-
 class AutoKeyboard():
     def __init__(self, led_pin_nr):
         self.led_pin = Pin(led_pin_nr, Pin.OUT)
@@ -67,16 +55,13 @@ class AutoKeyboard():
 
     def run(self):
         print("")
-    
         print("Registering keyboard class...")
-        #self.led_flash_3times_and_wait()
       
         # Register the keyboard interface and re-enumerate
-        #k = Usb0815Keyboard(led)
         k = KeyboardInterface()
-        usb.device.get().init(k, builtin_driver=True)
+        dev = usb.device.get()
+        dev.init(k, builtin_driver=True)
     
-        #self.led_flash_3times_and_wait()
         while not k.is_open():
             print("Opening keyboard...")
             #self.led_flash()
@@ -85,9 +70,7 @@ class AutoKeyboard():
         print("Entering keyboard loop...")
         self.led_flash_3times_and_wait()
 
-        # try to make this a multiple of 6:
-        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE, KeyCode.ESCAPE, KeyCode.ESCAPE]
-        # print(keys)
+        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE]
       
         if k.is_open():
             for i in range(6):
@@ -97,6 +80,7 @@ class AutoKeyboard():
                     k.send_keys([key])
                     self.led_flash()
 
+        dev.active(False)
         self.led_flash_3times_and_wait()
 
 

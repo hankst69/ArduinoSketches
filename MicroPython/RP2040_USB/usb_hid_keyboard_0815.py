@@ -67,27 +67,28 @@ class AutoKeyboard():
 
     def run(self):
         print("")
-    
         print("Registering keyboard class...")
-        #self.led_flash_3times_and_wait()
       
         # Register the keyboard interface and re-enumerate
         #k = Usb0815Keyboard(led)
         k = KeyboardInterface()
-        usb.device.get().init(k, builtin_driver=True)
+
+
+        # see: https://github.com/micropython/micropython-lib/blob/master/micropython/usb/usb-device/usb/device/core.py
+        dev = usb.device.get()
+        dev.init(k, builtin_driver=True)
     
-        #self.led_flash_3times_and_wait()
         while not k.is_open():
             print("Opening keyboard...")
             #self.led_flash()
             time.sleep_ms(500)
     
-        print("Entering keyboard loop...")
         self.led_flash_3times_and_wait()
 
-        # try to make this a multiple of 6:
-        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE, KeyCode.ESCAPE, KeyCode.ESCAPE]
-        # print(keys)
+        print("Entering keyboard loop...")
+
+        # see: https://github.com/micropython/micropython-lib/blob/master/micropython/usb/usb-device-keyboard/usb/device/keyboard.py
+        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE]
       
         if k.is_open():
             for i in range(6):
@@ -97,6 +98,8 @@ class AutoKeyboard():
                     k.send_keys([key])
                     self.led_flash()
 
+        dev.active(False)
+      
         self.led_flash_3times_and_wait()
 
 
