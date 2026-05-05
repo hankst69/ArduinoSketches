@@ -84,19 +84,21 @@ class AutoKeyboard():
     
         print("Entering keyboard loop...")
         self.led_flash_3times_and_wait()
-    
-        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER]
+
+        # try to make this a multiple of 6:
+        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE, KeyCode.ESCAPE, KeyCode.ESCAPE]
         # print(keys)
       
         if k.is_open():
-            for i in range(10):
+            for i in range(6):
                 time.sleep_ms(2000)
-                k.send_keys(keys)
-                self.led_flash()
+                #k.send_keys(keys)
+                for key in keys:
+                    k.send_keys([key])
+                    self.led_flash()
 
         self.led_flash_3times_and_wait()
 
 
 app = AutoKeyboard(ONBOARD_LED_PIN)
 app.run()
-
