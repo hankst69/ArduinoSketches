@@ -42,7 +42,7 @@ class AutoKeyboard():
 
     def led_flash(self):
         self.led_pin.value(0)  #led on means to set output to low
-        time.sleep_ms(10)
+        time.sleep_ms(5)
         self.led_pin.value(1)  #led off means to set output to high
 
     def led_flash_3times_and_wait(self):
@@ -68,19 +68,27 @@ class AutoKeyboard():
             time.sleep_ms(500)
     
         print("Entering keyboard loop...")
+
+        # idel 20sec and keep the user entertained
+        self.led_flash_3times_and_wait()
+        self.led_flash_3times_and_wait()
+        self.led_flash_3times_and_wait()
         self.led_flash_3times_and_wait()
 
-        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE]
+        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER] #, KeyCode.ESCAPE]
       
         if k.is_open():
-            for i in range(6):
+            for i in range(5):
                 time.sleep_ms(2000)
                 #k.send_keys(keys)
                 for key in keys:
                     k.send_keys([key])
                     self.led_flash()
+                k.send_keys([])
 
-        dev.active(False)
+        # Stopping
+        k.send_keys([])
+        #dev.active(False)
         self.led_flash_3times_and_wait()
 
 

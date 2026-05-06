@@ -54,7 +54,7 @@ class AutoKeyboard():
 
     def led_flash(self):
         self.led_pin.value(0)  #led on means to set output to low
-        time.sleep_ms(10)
+        time.sleep_ms(5)
         self.led_pin.value(1)  #led off means to set output to high
 
     def led_flash_3times_and_wait(self):
@@ -73,7 +73,6 @@ class AutoKeyboard():
         #k = Usb0815Keyboard(led)
         k = KeyboardInterface()
 
-
         # see: https://github.com/micropython/micropython-lib/blob/master/micropython/usb/usb-device/usb/device/core.py
         dev = usb.device.get()
         dev.init(k, builtin_driver=True)
@@ -83,9 +82,8 @@ class AutoKeyboard():
             #self.led_flash()
             time.sleep_ms(500)
     
-        self.led_flash_3times_and_wait()
-
         print("Entering keyboard loop...")
+        self.led_flash_3times_and_wait()
 
         # see: https://github.com/micropython/micropython-lib/blob/master/micropython/usb/usb-device-keyboard/usb/device/keyboard.py
         keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE]
@@ -97,9 +95,11 @@ class AutoKeyboard():
                 for key in keys:
                     k.send_keys([key])
                     self.led_flash()
+                k.send_keys([])
 
-        dev.active(False)
-      
+        # Stopping
+        k.send_keys([]dev.active(False)
+        #dev.active(False)
         self.led_flash_3times_and_wait()
 
 
