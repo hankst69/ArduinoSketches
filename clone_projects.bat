@@ -54,9 +54,9 @@ cd /d "%_AS_SimpleCWKeyer_DIR%"
 echo updating "%_AS_SimpleCWKeyer_DIR%"
 call git pull
 
-@rem https://github.com/hankst69/ats-mini.git
+@rem https://github.com/hankst69/ats-mini-salmer.git
 if not exist "%_AS_ATS-Mini_DIR%" (
-  call git clone "https://github.com/hankst69/ats-mini.git" "%_AS_ATS-Mini_DIR%"
+  call git clone "https://github.com/hankst69/ats-mini-salmer.git" "%_AS_ATS-Mini_DIR%"
 )
 cd /d "%_AS_ATS-Mini_DIR%"
 echo updating "%_AS_ATS-Mini_DIR%"
