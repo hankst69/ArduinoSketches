@@ -121,6 +121,7 @@ void setup() {
   }
   // init BT driver
   bleKeyboard.begin();
+  bleKeyboard.setDelay(0);
   // init OLED driver
   u8g2.begin();
   u8g2.setFont(OLED_FONT);
