@@ -1,0 +1,59 @@
+{
+  "name": "AMK_CYD_Universal_TFT",
+  "version": "1.6.5",
+  "description": "Universal standalone TFT, touch, sprite, gradients, 1-line JPEG/PNG image decoding, and visual GUI driver with runtime hardware autoSetup, Sunton/Waveshare ESP32-S3 direct GPIO & expander detection, adaptive multi-point autoCalibrate, built-in LDR auto-dimming, RGB LED control, and TFT_eSPI_Button support for ESP32 CYD resistive & capacitive boards and ESP32-S3 parallel RGB capacitive touch boards.",
+  "keywords": [
+    "display",
+    "cyd",
+    "cheap-yellow-display",
+    "esp32",
+    "esp32-s3",
+    "sunton",
+    "waveshare",
+    "guition",
+    "rgb-lcd",
+    "tft",
+    "tft-espi",
+    "touch",
+    "touch-calibration",
+    "auto-calibrate",
+    "auto-setup",
+    "auto-dimming",
+    "ldr",
+    "rgb-led",
+    "jpeg",
+    "png",
+    "image-decoder",
+    "gt911",
+    "cst820",
+    "xpt2046",
+    "ili9341",
+    "st7789",
+    "st7796",
+    "st7262",
+    "gradients",
+    "lvgl",
+    "squareline-studio",
+    "eez-studio",
+    "ft6336",
+    "hardware-profiles",
+    "dma-acceleration"
+  ],
+  "authors": [
+    {
+      "name": "Aung Moe Khine",
+      "email": "aungmoekhine@gmail.com",
+      "url": "https://github.com/aungmoekhine"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aungmoekhine/AMK_CYD_Universal_TFT.git"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "includeDir": "src",
+    "srcDir": "src"
+  }
+}

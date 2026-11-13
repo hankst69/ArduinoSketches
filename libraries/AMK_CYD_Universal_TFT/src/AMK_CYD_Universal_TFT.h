@@ -1,0 +1,2537 @@
+#pragma once
+#ifndef AMK_CYD_UNIVERSAL_TFT_H
+#define AMK_CYD_UNIVERSAL_TFT_H
+// ═══════════════════════════════════════════════════════════════════════════════
+// AMK_CYD_Universal_TFT.h - Universal standalone TFT, Touch & Sprite driver
+//                          for ESP32 CYD resistive boards (2.4" to 4.0")
+//                          and ESP32-S3 Parallel RGB capacitive boards (4.3", 5.0", 7.0").
+//
+// Usage in sketch:
+//     #include <AMK_CYD_Universal_TFT.h>
+//
+// Cross-platform globals (works seamlessly on CYD and S3 RGB):
+//     AMK_display  display;
+//     AMK_touch    touch;
+//     TFT_eSPI     tft;
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <FS.h>
+#include <math.h>
+#include <algorithm>
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(BOARD_ESP32_S3_RGB) || defined(BOARD_ESP32_S3_TOUCH_7) || defined(ARDUINO_WAVESHARE_ESP32_S3_TOUCH_LCD_7)
+  #define AMK_BACKEND_ESP32_S3 1
+  #include "AMK_S3_RGB_Board.h"
+  #include "chipguy_S3_RGB_display.h"
+  #include "chipguy_S3_capacitive_touch.h"
+
+  // ── Generalized Naming for ESP32-S3 RGB Displays & Capacitive Touch ──────────
+  // Covers 4.3", 5.0", 7.0" 800x480 ST7262 RGB panels + GT911 touch
+  using chipguy_S3_RGB_display  = ::chipguy_S3_RGB_display;
+  using AMK_S3_RGB_display      = chipguy_S3_RGB_display;
+  using AMK_S3_display          = chipguy_S3_RGB_display;
+  using ESP32S3_RGB_display     = chipguy_S3_RGB_display;
+  using ESP32S3_Touch_LCD_7     = chipguy_S3_RGB_display;
+
+  using chipguy_S3_capacitive_touch = ::chipguy_S3_capacitive_touch;
+  using AMK_S3_touch            = chipguy_S3_capacitive_touch;
+  using AMK_S3_Capacitive_touch = chipguy_S3_capacitive_touch;
+  using ESP32S3_Touch           = chipguy_S3_capacitive_touch;
+  using ESP32S3_Touch_LCD_7_Touch = chipguy_S3_capacitive_touch;
+
+  // Universal Cross-Platform Aliases (write once, run on CYD and S3 RGB)
+  using AMK_CYD_display         = AMK_S3_RGB_display;
+  using AMK_CYD_touch           = AMK_S3_touch;
+  using AMK_display             = AMK_S3_RGB_display;
+  using AMK_touch               = AMK_S3_touch;
+
+  // Compatibility stubs for CYD override structures when building on ESP32-S3
+  struct cydr_overrides_t {
+      uint8_t panel = 0;
+      uint8_t colorOrder = 0;
+      uint8_t inversion = 0;
+      uint8_t mirrorX = 0;
+      uint8_t mirrorY = 0;
+      uint8_t spiClock = 0;
+      uint8_t backlight = 0;
+      uint8_t touchBus = 0;
+      uint8_t touchMirrorX = 0;
+      uint8_t touchMirrorY = 0;
+      uint8_t touchSwapXY = 0;
+      uint8_t redLed = 0;
+      uint8_t greenBlue = 0;
+      uint8_t gpio34 = 0;
+      uint8_t model = 0;
+      uint8_t size = 0;
+      uint8_t powerKey = 0;
+  };
+  inline bool cydr_loadOverrides(cydr_overrides_t &) { return false; }
+  inline void cydr_saveOverrides(const cydr_overrides_t &) {}
+  inline void cydr_clearOverrides() {}
+  inline bool cydr_anyOverride(const cydr_overrides_t &) { return false; }
+
+#else
+  #define AMK_BACKEND_ESP32_CYD 1
+  #include "chipguy_CYD_resistive_display.h"
+  #include "chipguy_CYD_resistive_touch.h"
+
+  // ─── Type Aliases for Backward & Universal Compatibility ──────────────────────
+  using AMK_CYD_display = chipguy_CYD_resistive_display;
+  using AMK_CYD_touch   = chipguy_CYD_resistive_touch;
+  using AMK_display     = chipguy_CYD_resistive_display;
+  using AMK_touch       = chipguy_CYD_resistive_touch;
+#endif
+
+#include "AMK_Hardware_Profiles.h"
+
+#ifndef pgm_read_ptr
+#define pgm_read_ptr(addr) (*(const void **)(addr))
+#endif
+
+#ifndef LOAD_GFXFF
+#define LOAD_GFXFF
+#endif
+
+#include "Fonts/GFXFF/gfxfont.h"
+#include "Free_Fonts.h"
+
+// ─── Color constants (RGB565) ────────────────────────────────────────────────
+#ifndef TFT_BLACK
+#define TFT_BLACK        0x0000
+#define TFT_NAVY         0x000F
+#define TFT_DARKGREEN    0x03E0
+#define TFT_DARKCYAN     0x03EF
+#define TFT_MAROON       0x7800
+#define TFT_PURPLE       0x780F
+#define TFT_OLIVE        0x7BE0
+#define TFT_LIGHTGREY    0xC618
+#define TFT_DARKGREY     0x7BEF
+#define TFT_BLUE         0x001F
+#define TFT_GREEN        0x07E0
+#define TFT_CYAN         0x07FF
+#define TFT_RED          0xF800
+#define TFT_MAGENTA      0xF81F
+#define TFT_YELLOW       0xFFE0
+#define TFT_WHITE        0xFFFF
+#define TFT_ORANGE       0xFD20
+#define TFT_GREENYELLOW  0xAFE5
+#define TFT_PINK         0xFC18
+#endif
+
+#ifndef TFT_TRANSPARENT
+#define TFT_TRANSPARENT  0x0120
+#endif
+
+// ─── Text datum constants ────────────────────────────────────────────────────
+#ifndef TL_DATUM
+#define TL_DATUM 0
+#define TC_DATUM 1
+#define TR_DATUM 2
+#define ML_DATUM 3
+#define CL_DATUM 3
+#define MC_DATUM 4
+#define CC_DATUM 4
+#define MR_DATUM 5
+#define CR_DATUM 5
+#define BL_DATUM 6
+#define BC_DATUM 7
+#define BR_DATUM 8
+#endif
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Embedded 5x7 bitmap font  (ASCII 32-127, 5 bytes per glyph)
+//  Each byte = one column; bit 0 = top row, bit 6 = bottom row.
+// ═══════════════════════════════════════════════════════════════════════════════
+static const uint8_t _amk_font5x7[] PROGMEM = {
+    0x00,0x00,0x00,0x00,0x00, // 32  (space)
+    0x00,0x00,0x5F,0x00,0x00, // 33  !
+    0x00,0x07,0x00,0x07,0x00, // 34  "
+    0x14,0x7F,0x14,0x7F,0x14, // 35  #
+    0x24,0x2A,0x7F,0x2A,0x12, // 36  $
+    0x23,0x13,0x08,0x64,0x62, // 37  %
+    0x36,0x49,0x55,0x22,0x50, // 38  &
+    0x00,0x05,0x03,0x00,0x00, // 39  '
+    0x00,0x1C,0x22,0x41,0x00, // 40  (
+    0x00,0x41,0x22,0x1C,0x00, // 41  )
+    0x14,0x08,0x3E,0x08,0x14, // 42  *
+    0x08,0x08,0x3E,0x08,0x08, // 43  +
+    0x00,0x50,0x30,0x00,0x00, // 44  ,
+    0x08,0x08,0x08,0x08,0x08, // 45  -
+    0x00,0x60,0x60,0x00,0x00, // 46  .
+    0x20,0x10,0x08,0x04,0x02, // 47  /
+    0x3E,0x51,0x49,0x45,0x3E, // 48  0
+    0x00,0x42,0x7F,0x40,0x00, // 49  1
+    0x42,0x61,0x51,0x49,0x46, // 50  2
+    0x21,0x41,0x45,0x4B,0x31, // 51  3
+    0x18,0x14,0x12,0x7F,0x10, // 52  4
+    0x27,0x45,0x45,0x45,0x39, // 53  5
+    0x3C,0x4A,0x49,0x49,0x30, // 54  6
+    0x01,0x71,0x09,0x05,0x03, // 55  7
+    0x36,0x49,0x49,0x49,0x36, // 56  8
+    0x06,0x49,0x49,0x29,0x1E, // 57  9
+    0x00,0x36,0x36,0x00,0x00, // 58  :
+    0x00,0x56,0x36,0x00,0x00, // 59  ;
+    0x08,0x14,0x22,0x41,0x00, // 60  <
+    0x14,0x14,0x14,0x14,0x14, // 61  =
+    0x00,0x41,0x22,0x14,0x08, // 62  >
+    0x02,0x01,0x51,0x09,0x06, // 63  ?
+    0x32,0x49,0x79,0x41,0x3E, // 64  @
+    0x7E,0x11,0x11,0x11,0x7E, // 65  A
+    0x7F,0x49,0x49,0x49,0x36, // 66  B
+    0x3E,0x41,0x41,0x41,0x22, // 67  C
+    0x7F,0x41,0x41,0x22,0x1C, // 68  D
+    0x7F,0x49,0x49,0x49,0x41, // 69  E
+    0x7F,0x09,0x09,0x09,0x01, // 70  F
+    0x3E,0x41,0x49,0x49,0x7A, // 71  G
+    0x7F,0x08,0x08,0x08,0x7F, // 72  H
+    0x00,0x41,0x7F,0x41,0x00, // 73  I
+    0x20,0x40,0x41,0x3F,0x01, // 74  J
+    0x7F,0x08,0x14,0x22,0x41, // 75  K
+    0x7F,0x40,0x40,0x40,0x40, // 76  L
+    0x7F,0x02,0x0C,0x02,0x7F, // 77  M
+    0x7F,0x04,0x08,0x10,0x7F, // 78  N
+    0x3E,0x41,0x41,0x41,0x3E, // 79  O
+    0x7F,0x09,0x09,0x09,0x06, // 80  P
+    0x3E,0x41,0x51,0x21,0x5E, // 81  Q
+    0x7F,0x09,0x19,0x29,0x46, // 82  R
+    0x46,0x49,0x49,0x49,0x31, // 83  S
+    0x01,0x01,0x7F,0x01,0x01, // 84  T
+    0x3F,0x40,0x40,0x40,0x3F, // 85  U
+    0x1F,0x20,0x40,0x20,0x1F, // 86  V
+    0x3F,0x40,0x38,0x40,0x3F, // 87  W
+    0x63,0x14,0x08,0x14,0x63, // 88  X
+    0x07,0x08,0x70,0x08,0x07, // 89  Y
+    0x61,0x51,0x49,0x45,0x43, // 90  Z
+    0x00,0x7F,0x41,0x41,0x00, // 91  [
+    0x02,0x04,0x08,0x10,0x20, // 92  backslash
+    0x00,0x41,0x41,0x7F,0x00, // 93  ]
+    0x04,0x02,0x01,0x02,0x04, // 94  ^
+    0x40,0x40,0x40,0x40,0x40, // 95  _
+    0x00,0x01,0x02,0x04,0x00, // 96  `
+    0x20,0x54,0x54,0x54,0x78, // 97  a
+    0x7F,0x48,0x44,0x44,0x38, // 98  b
+    0x38,0x44,0x44,0x44,0x20, // 99  c
+    0x38,0x44,0x44,0x48,0x7F, // 100 d
+    0x38,0x54,0x54,0x54,0x18, // 101 e
+    0x08,0x7E,0x09,0x01,0x02, // 102 f
+    0x0C,0x52,0x52,0x52,0x3E, // 103 g
+    0x7F,0x08,0x04,0x04,0x78, // 104 h
+    0x00,0x44,0x7D,0x40,0x00, // 105 i
+    0x20,0x40,0x44,0x3D,0x00, // 106 j
+    0x7F,0x10,0x28,0x44,0x00, // 107 k
+    0x00,0x41,0x7F,0x40,0x00, // 108 l
+    0x7C,0x04,0x18,0x04,0x78, // 109 m
+    0x7C,0x08,0x04,0x04,0x78, // 110 n
+    0x38,0x44,0x44,0x44,0x38, // 111 o
+    0x7C,0x14,0x14,0x14,0x08, // 112 p
+    0x08,0x14,0x14,0x18,0x7C, // 113 q
+    0x7C,0x08,0x04,0x04,0x08, // 114 r
+    0x48,0x54,0x54,0x54,0x20, // 115 s
+    0x04,0x3F,0x44,0x40,0x20, // 116 t
+    0x3C,0x40,0x40,0x20,0x7C, // 117 u
+    0x1C,0x20,0x40,0x20,0x1C, // 118 v
+    0x3C,0x40,0x30,0x40,0x3C, // 119 w
+    0x44,0x28,0x10,0x28,0x44, // 120 x
+    0x0C,0x50,0x50,0x50,0x3C, // 121 y
+    0x44,0x64,0x54,0x4C,0x44, // 122 z
+    0x00,0x08,0x36,0x41,0x00, // 123 {
+    0x00,0x00,0x7F,0x00,0x00, // 124 |
+    0x00,0x41,0x36,0x08,0x00, // 125 }
+    0x10,0x08,0x08,0x10,0x08, // 126 ~
+    0x78,0x46,0x41,0x46,0x78, // 127 DEL
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  The sketch provides the display and touch objects. We reference them via
+//  extern so that tft.init() and touch.begin(display) use the SAME physical object.
+// ═══════════════════════════════════════════════════════════════════════════════
+#if defined(AMK_BACKEND_ESP32_S3)
+extern AMK_S3_RGB_display display;
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+extern AMK_S3_touch       touch;
+#endif
+#else
+extern chipguy_CYD_resistive_display display;
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+extern chipguy_CYD_resistive_touch   touch;
+#endif
+#endif
+
+class TFT_eSprite;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TFT_eSPI  -  Base display class
+// ═══════════════════════════════════════════════════════════════════════════════
+class TFT_eSPI : public Print {
+protected:
+    uint8_t  _textDatum   = TL_DATUM;
+    uint8_t  _textSize    = 1;
+    uint16_t _textFg      = TFT_WHITE;
+    uint16_t _textBg      = TFT_BLACK;
+    bool     _swapBytes   = false;
+    int16_t  _cursorX     = 0;
+    int16_t  _cursorY     = 0;
+    bool     _textWrap    = true;
+    uint16_t _textPadding = 0;
+    int16_t  _pivotX      = 0;
+    int16_t  _pivotY      = 0;
+    const GFXfont* _gfxFont = nullptr;
+    int8_t   _glyph_ab    = 0;
+    int8_t   _glyph_bb    = 0;
+
+    // Hardware Auto-Setup & Driver State (v1.6.0)
+    bool     _autoBrightnessActive  = true;
+    uint8_t  _activeBacklightLevel  = 160;
+    int      _lastAppliedBrightness = -1;
+    bool     _hasLdrSensor          = true;
+    bool     _isBattery             = false;
+    int8_t   _redPin                = -1;
+    int8_t   _greenPin              = -1;
+    int8_t   _bluePin               = -1;
+    int      _ldrReadings[10]       = {0};
+    int      _ldrReadIndex          = 0;
+    long     _ldrTotal              = 0;
+    unsigned long _lastLdrSampleTime= 0;
+
+    virtual void _pixel(int32_t x, int32_t y, uint16_t color) {
+#if defined(AMK_BACKEND_ESP32_S3)
+        display.drawPixel(x, y, color);
+#else
+        if (x < 0 || y < 0 || x >= display.width() || y >= display.height()) return;
+        alignas(4) static uint16_t _px;
+        display.waitFlush();
+        _px = __builtin_bswap16(color);
+        display.flushRegion(x, y, x, y, &_px);
+#endif
+    }
+
+    virtual void _fill(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color) {
+#if defined(AMK_BACKEND_ESP32_S3)
+        display.fillRect(x, y, w, h, color);
+#else
+        if (w <= 0 || h <= 0) return;
+        int16_t sw = display.width(), sh = display.height();
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > sw) w = sw - x;
+        if (y + h > sh) h = sh - y;
+        if (w <= 0 || h <= 0) return;
+
+        alignas(4) static uint16_t _lineBuf[800];
+        uint16_t be = __builtin_bswap16(color);
+        for (int32_t row = 0; row < h; row++) {
+            display.waitFlush();
+            for (int32_t i = 0; i < w; i++) _lineBuf[i] = be;
+            display.flushRegion(x, y + row, x + w - 1, y + row, _lineBuf);
+        }
+        display.waitFlush();
+#endif
+    }
+
+    virtual void _drawChar(int32_t x, int32_t y, unsigned char c,
+                           uint16_t fg, uint16_t bg, uint8_t scale) {
+        if (c < 32 || c > 127) c = '?';
+        const uint8_t* glyph = &_amk_font5x7[(c - 32) * 5];
+        int16_t cw = 6 * scale;
+        int16_t ch = 8 * scale;
+
+        int16_t maxW = width();
+        int16_t maxH = height();
+        if (x + cw <= 0 || y + ch <= 0 || x >= maxW || y >= maxH) return;
+
+        bool transparent = (fg == bg) || (bg == TFT_TRANSPARENT);
+
+        if (!isSprite()) {
+            if (transparent) {
+                for (int col = 0; col < 5; col++) {
+                    uint8_t line = pgm_read_byte(&glyph[col]);
+                    for (int row = 0; row < 8; row++) {
+                        if (line & (1 << row)) {
+                            _fill(x + col * scale, y + row * scale, scale, scale, fg);
+                        }
+                    }
+                }
+                return;
+            }
+
+            if (scale <= 3) {
+                alignas(4) static uint16_t _charBuf[18 * 24];
+                uint16_t beFg = __builtin_bswap16(fg);
+                uint16_t beBg = __builtin_bswap16(bg);
+                for (int row = 0; row < 8; row++) {
+                    for (int col = 0; col < 6; col++) {
+                        uint16_t clr;
+                        if (col < 5) {
+                            uint8_t line = pgm_read_byte(&glyph[col]);
+                            clr = (line & (1 << row)) ? beFg : beBg;
+                        } else {
+                            clr = beBg;
+                        }
+                        for (int sy = 0; sy < scale; sy++)
+                            for (int sx = 0; sx < scale; sx++)
+                                _charBuf[(row * scale + sy) * cw + col * scale + sx] = clr;
+                    }
+                }
+                display.waitFlush();
+                display.flushRegion(x, y, x + cw - 1, y + ch - 1, _charBuf);
+                display.waitFlush();
+            } else {
+                for (int col = 0; col < 5; col++) {
+                    uint8_t line = pgm_read_byte(&glyph[col]);
+                    for (int row = 0; row < 8; row++) {
+                        uint16_t clr = (line & (1 << row)) ? fg : bg;
+                        _fill(x + col * scale, y + row * scale, scale, scale, clr);
+                    }
+                }
+                _fill(x + 5 * scale, y, scale, ch, bg);
+            }
+        } else {
+            if (transparent) {
+                for (int col = 0; col < 5; col++) {
+                    uint8_t line = pgm_read_byte(&glyph[col]);
+                    for (int row = 0; row < 8; row++) {
+                        if (line & (1 << row)) {
+                            if (scale == 1) _pixel(x + col, y + row, fg);
+                            else _fill(x + col * scale, y + row * scale, scale, scale, fg);
+                        }
+                    }
+                }
+                return;
+            }
+
+            for (int col = 0; col < 5; col++) {
+                uint8_t line = pgm_read_byte(&glyph[col]);
+                for (int row = 0; row < 8; row++) {
+                    uint16_t clr = (line & (1 << row)) ? fg : bg;
+                    if (scale == 1) _pixel(x + col, y + row, clr);
+                    else _fill(x + col * scale, y + row * scale, scale, scale, clr);
+                }
+            }
+            if (scale == 1) _fill(x + 5, y, 1, 8, bg);
+            else _fill(x + 5 * scale, y, scale, ch, bg);
+        }
+    }
+
+    virtual int16_t _drawCharGFX(int32_t x, int32_t y, unsigned char c,
+                                 uint16_t fg, uint16_t bg, uint8_t scale) {
+        (void)bg;
+        if (!_gfxFont) return 0;
+        uint16_t first = pgm_read_word(&_gfxFont->first);
+        uint16_t last  = pgm_read_word(&_gfxFont->last);
+        if (c < first || c > last) return 0;
+
+        uint16_t idx = c - first;
+        const GFXglyph* glyphs = (const GFXglyph*)pgm_read_ptr(&_gfxFont->glyph);
+        const uint8_t*  bitmap = (const uint8_t*)pgm_read_ptr(&_gfxFont->bitmap);
+
+        uint32_t bo = pgm_read_word(&glyphs[idx].bitmapOffset);
+        uint8_t  w  = pgm_read_byte(&glyphs[idx].width);
+        uint8_t  h  = pgm_read_byte(&glyphs[idx].height);
+        uint8_t  xa = pgm_read_byte(&glyphs[idx].xAdvance);
+        int8_t   xo = (int8_t)pgm_read_byte(&glyphs[idx].xOffset);
+        int8_t   yo = (int8_t)pgm_read_byte(&glyphs[idx].yOffset);
+
+        uint8_t bits = 0, bit = 0;
+        uint16_t hpc = 0;
+
+        for (uint8_t yy = 0; yy < h; yy++) {
+            for (uint8_t xx = 0; xx < w; xx++) {
+                if (bit == 0) {
+                    bits = pgm_read_byte(&bitmap[bo++]);
+                    bit = 0x80;
+                }
+                if (bits & bit) {
+                    hpc++;
+                } else {
+                    if (hpc) {
+                        if (scale == 1) {
+                            drawFastHLine(x + xo + xx - hpc, y + yo + yy, hpc, fg);
+                        } else {
+                            fillRect(x + (xo + xx - hpc) * scale, y + (yo + yy) * scale, scale * hpc, scale, fg);
+                        }
+                        hpc = 0;
+                    }
+                }
+                bit >>= 1;
+            }
+            if (hpc) {
+                if (scale == 1) {
+                    drawFastHLine(x + xo + w - hpc, y + yo + yy, hpc, fg);
+                } else {
+                    fillRect(x + (xo + w - hpc) * scale, y + (yo + yy) * scale, scale * hpc, scale, fg);
+                }
+                hpc = 0;
+            }
+        }
+        return (int16_t)(xa * scale);
+    }
+
+public:
+    TFT_eSPI() = default;
+    virtual ~TFT_eSPI() = default;
+
+    virtual bool isSprite() const { return false; }
+
+    void init() {
+        display.begin();
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+        touch.begin(display);
+#endif
+    }
+    void begin() { init(); }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ── Universal Hardware Auto-Setup Engine (v1.6.0) ──────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    void autoSetup(uint8_t rotation = 3, bool autoCalibrateIfUnset = false, bool verboseReport = true) {
+        // 1. Initialize Display Subsystem & Hardware Probing
+        init();
+        setRotation(rotation);
+        setSwapBytes(true); // Maintain RGB565 byte order for sprites & bitmaps
+
+        // 2. Auto-Detect Backlight Pin & Configure 8-Bit PWM (Zero hardcoded pins)
+        uint8_t blPin = backlightPin();
+        if (blPin > 0) {
+            pinMode(blPin, OUTPUT);
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+            analogWriteResolution(blPin, 8);
+#else
+            analogWriteResolution(8);
+#endif
+            analogWrite(blPin, _activeBacklightLevel);
+        }
+
+        // 3. Auto-Detect GPIO 34 Role (LDR Light Sensor vs Battery Divider)
+#if !defined(AMK_BACKEND_ESP32_S3)
+        int8_t gpio34Role = display.gpio34IsBattery();
+        _isBattery = (gpio34Role == 1);
+        _hasLdrSensor = (gpio34Role != 1);
+        if (_hasLdrSensor) {
+            pinMode(34, INPUT);
+            // Prime the 10-read moving average filter at boot per hardware standard
+            for (int i = 0; i < 10; i++) {
+                adjustBrightness();
+                delay(10);
+            }
+        }
+#else
+        _hasLdrSensor = false;
+        _isBattery = false;
+#endif
+
+        // 4. Auto-Detect RGB LED Pins & Initialize Active-LOW States
+#if !defined(AMK_BACKEND_ESP32_S3)
+        _redPin   = display.redLedPin();
+        _greenPin = display.greenLedPin();
+        _bluePin  = display.blueLedPin();
+
+        if (_redPin >= 0)   { pinMode(_redPin, OUTPUT);   digitalWrite(_redPin, HIGH); }
+        if (_greenPin >= 0) { pinMode(_greenPin, OUTPUT); digitalWrite(_greenPin, HIGH); }
+        if (_bluePin >= 0)  { pinMode(_bluePin, OUTPUT);  digitalWrite(_bluePin, HIGH); }
+
+        flashLedSequence();
+#endif
+
+        // 5. Auto-Detect & Initialize Touch Controller
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+        touch.begin(display);
+        touch.setRotation(rotation);
+        if (!touch.capacitive()) {
+            touch.loadCalibration();
+            if (!touch.loadFilters()) {
+                // Apply optimal default noise & pressure filters (rejects ghost touches & spikes)
+                touch.setFilters(200, 50);
+            }
+            if (autoCalibrateIfUnset && !hasTouchCalibration()) {
+                autoCalibrate(false);
+            }
+        }
+#endif
+
+        // 6. Print Hardware Diagnostic Audit Report if requested
+        if (verboseReport) {
+            printHardwareReport();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ── Adaptive Multi-Point Statistical Calibration Engine (v1.6.0) ───────────
+    // ═══════════════════════════════════════════════════════════════════════════
+    bool hasTouchCalibration() {
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+        if (touch.capacitive()) return true;
+        return touch.loadCalibration();
+#else
+        return true;
+#endif
+    }
+
+    bool autoCalibrate(bool force = false, bool canSkipWithBoot = true) {
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+        if (touch.capacitive()) {
+            Serial.printf("[AMK Touch] Capacitive controller detected (%s) - factory digital calibration (0 ms bypass).\n", touch.chipName());
+            return true;
+        }
+
+        // Check if BOOT button (GPIO 0) is being held down at power-up/call
+        pinMode(0, INPUT_PULLUP);
+        if (digitalRead(0) == LOW) {
+            force = true;
+            Serial.println("[AMK Touch] BOOT pin (GPIO 0) held - Forcing interactive multi-point calibration!");
+        }
+
+        // Fast-path bypass if already calibrated and not forced
+        if (!force && touch.loadCalibration()) {
+            touch.loadFilters();
+            Serial.println("[AMK Touch] Active calibration loaded from NVS flash (< 1 ms).");
+            return true;
+        }
+
+        Serial.println("\n[AMK Touch] =====================================================");
+        Serial.printf("[AMK Touch] Launching Adaptive Multi-Point Calibration Engine\n");
+        Serial.printf("[AMK Touch] Board: %s | Display: %dx%d (Rot %d)\n",
+                      display.modelName(), width(), height(), getRotation());
+        Serial.println("[AMK Touch] =====================================================");
+
+        // Turn backlight to full brightness for crystal-clear crosshair viewing
+        uint8_t blPin = backlightPin();
+        if (blPin > 0) {
+            pinMode(blPin, OUTPUT);
+            analogWrite(blPin, 255);
+        }
+
+        // Clear touch buffer / wait release
+        uint16_t ra, rb;
+        uint32_t lastDown = millis();
+        while (millis() - lastDown < 150) {
+            if (touch.readRaw(ra, rb)) lastDown = millis();
+            delay(5);
+        }
+
+        // Ensure clean text size and standard font for calibration screen
+        setTextSize(1);
+        setFreeFont(nullptr);
+
+        const int scrW = width();
+        const int scrH = height();
+        const int targetRot = getRotation();
+        int natW = touch.nativeWidth();
+        int natH = touch.nativeHeight();
+        if (natW <= 0) natW = 240;
+        if (natH <= 0) natH = 320;
+
+        const int MAXPTS = 30;
+        int gx[MAXPTS], gy[MAXPTS];
+        float rawXs[MAXPTS], rawYs[MAXPTS];
+        float natX[MAXPTS], natY[MAXPTS];
+
+        const int cols[] = {4, 5, 6};
+        const int rows[] = {3, 4, 5};
+        const float ACCEPT_RMS = 6.0f;
+        const float ACCEPT_MAX = 16.0f;
+        const int JITTER_RAW = 130;
+        const int MIN_SAMPLES = 8;
+
+        uint16_t xMin = 0, xMax = 0, yMin = 0, yMax = 0;
+        float finalRms = 0.0f, finalMaxErr = 0.0f;
+        bool skipped = false;
+
+        auto linfitCalc = [](const float *I, const float *D, int n, float &a, float &b) {
+            float sI = 0, sD = 0, sII = 0, sID = 0;
+            for (int i = 0; i < n; i++) {
+                sI  += I[i];
+                sD  += D[i];
+                sII += I[i] * I[i];
+                sID += I[i] * D[i];
+            }
+            float den = n * sII - sI * sI;
+            b = (den != 0.0f) ? (n * sID - sI * sD) / den : 0.0f;
+            a = (sD - b * sI) / n;
+        };
+
+        auto screenToNativeMap = [](int sx, int sy, int rot, int nativeW, int nativeH, float &px, float &py) {
+            int W = nativeW - 1;
+            int H = nativeH - 1;
+            uint8_t r = cydr_normalize_rotation(rot);
+            switch (r) {
+                case 0: px = sx;     py = sy;     break;
+                case 1: px = W - sy; py = sx;     break;
+                case 2: px = W - sx; py = H - sy; break;
+                case 3: px = sy;     py = H - sx; break;
+                default: px = sx;    py = sy;     break;
+            }
+        };
+
+        auto nativeToScreenMap = [](float px, float py, int rot, int nativeW, int nativeH, float &sx, float &sy) {
+            int W = nativeW - 1;
+            int H = nativeH - 1;
+            uint8_t r = cydr_normalize_rotation(rot);
+            switch (r) {
+                case 0: sx = px;     sy = py;     break;
+                case 1: sx = py;     sy = W - px; break;
+                case 2: sx = W - px; sy = H - py; break;
+                case 3: sx = H - py; sy = px;     break;
+                default: sx = px;    sy = py;     break;
+            }
+        };
+
+        auto clampVal = [](float v) -> uint16_t {
+            if (v < 0.0f) return 0;
+            if (v > 4095.0f) return 4095;
+            return (uint16_t)(v + 0.5f);
+        };
+
+        auto drawCross = [&](int cx, int cy, uint16_t lineCol, uint16_t centerCol) {
+            drawFastHLine(0, cy - 1, scrW, lineCol);
+            drawFastHLine(0, cy,     scrW, lineCol);
+            drawFastHLine(0, cy + 1, scrW, lineCol);
+            drawFastVLine(cx - 1, 0, scrH, lineCol);
+            drawFastVLine(cx,     0, scrH, lineCol);
+            drawFastVLine(cx + 1, 0, scrH, lineCol);
+            fillRect(cx - 4, cy - 4, 9, 9, centerCol);
+        };
+
+        for (int t = 0; t < 3; t++) {
+            int numCols = cols[t];
+            int numRows = rows[t];
+            int MX = scrW / 10;
+            int MY = scrH / 10;
+            int totalPts = 0;
+
+            for (int r = 0; r < numRows; r++) {
+                for (int c = 0; c < numCols; c++) {
+                    gx[totalPts] = (numCols <= 1) ? scrW / 2 : MX + c * (scrW - 1 - 2 * MX) / (numCols - 1);
+                    gy[totalPts] = (numRows <= 1) ? scrH / 2 : MY + r * (scrH - 1 - 2 * MY) / (numRows - 1);
+                    totalPts++;
+                }
+            }
+
+            if (t > 0) {
+                fillScreen(TFT_BLACK);
+                setTextDatum(MC_DATUM);
+                setTextColor(TFT_ORANGE, TFT_BLACK);
+                drawString("Fit error high - escalating grid...", scrW / 2, scrH / 2 - 10, (scrW > 320) ? 2 : 1);
+                char errBuf[64];
+                snprintf(errBuf, sizeof(errBuf), "RMS: %.1f px | Max: %.1f px", finalRms, finalMaxErr);
+                drawString(errBuf, scrW / 2, scrH / 2 + 10, (scrW > 320) ? 2 : 1);
+                delay(1200);
+            }
+
+            for (int i = 0; i < totalPts; i++) {
+                bool pointCaptured = false;
+                while (!pointCaptured) {
+                    fillScreen(TFT_BLACK);
+                    setTextDatum(TC_DATUM);
+                    setTextColor(TFT_CYAN, TFT_BLACK);
+                    drawString("AMK TOUCH CALIBRATION", scrW / 2, 6, (scrW > 320) ? 2 : 1);
+
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "Point %d of %d - Tap & hold crosshair", i + 1, totalPts);
+                    setTextColor(TFT_WHITE, TFT_BLACK);
+                    drawString(buf, scrW / 2, 24, 1);
+
+                    if (canSkipWithBoot) {
+                        setTextDatum(BC_DATUM);
+                        setTextColor(0x7BEF, TFT_BLACK); // Grey
+                        drawString("Press BOOT button to skip", scrW / 2, scrH - 4, 1);
+                    }
+
+                    drawCross(gx[i], gy[i], TFT_WHITE, TFT_RED);
+
+                    // Wait release
+                    lastDown = millis();
+                    while (millis() - lastDown < 100) {
+                        if (touch.readRaw(ra, rb)) lastDown = millis();
+                        delay(5);
+                    }
+
+                    // Wait for touch or skip
+                    while (!touch.readRaw(ra, rb)) {
+                        if (canSkipWithBoot && digitalRead(0) == LOW) {
+                            skipped = true;
+                            break;
+                        }
+                        delay(5);
+                    }
+                    if (skipped) break;
+
+                    // Sample for 300 ms
+                    uint32_t sx = 0, sy = 0;
+                    int nSamples = 0;
+                    uint16_t minx = 4095, maxx = 0, miny = 4095, maxy = 0;
+                    uint32_t sampleStart = millis();
+                    while (millis() - sampleStart < 300) {
+                        if (touch.readRaw(ra, rb)) {
+                            sx += ra; sy += rb; nSamples++;
+                            if (ra < minx) minx = ra; if (ra > maxx) maxx = ra;
+                            if (rb < miny) miny = rb; if (rb > maxy) maxy = rb;
+                        }
+                        delay(8);
+                    }
+
+                    // Wait release
+                    lastDown = millis();
+                    while (millis() - lastDown < 100) {
+                        if (touch.readRaw(ra, rb)) lastDown = millis();
+                        delay(5);
+                    }
+
+                    if (nSamples < MIN_SAMPLES || (maxx - minx) > JITTER_RAW || (maxy - miny) > JITTER_RAW) {
+                        // Shaky touch
+                        drawCross(gx[i], gy[i], TFT_BLACK, TFT_BLACK);
+                        fillRect(0, 18, scrW, 16, TFT_BLACK); // Cleanly wipe point progress text
+                        setTextDatum(TC_DATUM);
+                        setTextColor(TFT_YELLOW, TFT_BLACK);
+                        drawString("Too shaky! Hold stylus steady...", scrW / 2, 24, 1);
+                        flashLed(true, false, false, 80); // Red flash
+                        delay(700);
+                    } else {
+                        rawXs[i] = (float)sx / nSamples;
+                        rawYs[i] = (float)sy / nSamples;
+                        pointCaptured = true;
+                        flashLed(false, true, false, 30); // Green flash on valid point!
+                    }
+                }
+
+                if (skipped) break;
+            }
+
+            if (skipped) break;
+
+            // Compute Linear Regression
+            for (int i = 0; i < totalPts; i++) {
+                screenToNativeMap(gx[i], gy[i], targetRot, natW, natH, natX[i], natY[i]);
+            }
+
+            float ax, bx, ay, by;
+            linfitCalc(natX, rawXs, totalPts, ax, bx);
+            linfitCalc(natY, rawYs, totalPts, ay, by);
+
+            const bool mx = touch.mirrorsX(), my = touch.mirrorsY();
+            uint16_t rx0 = clampVal(ax), rx1 = clampVal(ax + bx * (natW - 1));
+            uint16_t ry0 = clampVal(ay), ry1 = clampVal(ay + by * (natH - 1));
+            xMin = mx ? rx1 : rx0;  xMax = mx ? rx0 : rx1;
+            yMin = my ? ry1 : ry0;  yMax = my ? ry0 : ry1;
+            if (xMin > xMax) std::swap(xMin, xMax);
+            if (yMin > yMax) std::swap(yMin, yMax);
+
+            float sumSq = 0.0f;
+            finalMaxErr = 0.0f;
+            for (int i = 0; i < totalPts; i++) {
+                float prePx  = (xMax != xMin) ? (rawXs[i] - xMin) * (natW - 1.0f) / (xMax - xMin) : 0;
+                float prePy  = (yMax != yMin) ? (rawYs[i] - yMin) * (natH - 1.0f) / (yMax - yMin) : 0;
+                float predPx = mx ? (natW - 1) - prePx : prePx;
+                float predPy = my ? (natH - 1) - prePy : prePy;
+
+                float predSx, predSy;
+                nativeToScreenMap(predPx, predPy, targetRot, natW, natH, predSx, predSy);
+
+                float ex = predSx - gx[i];
+                float ey = predSy - gy[i];
+                float err = sqrtf(ex * ex + ey * ey);
+                sumSq += err * err;
+                if (err > finalMaxErr) finalMaxErr = err;
+            }
+            finalRms = sqrtf(sumSq / totalPts);
+
+            if (finalRms <= ACCEPT_RMS && finalMaxErr <= ACCEPT_MAX) {
+                break; // Met strict statistical acceptance criteria
+            }
+        }
+
+        if (skipped) {
+            Serial.println("[AMK Touch] Multi-point calibration skipped by user.");
+            fillScreen(TFT_BLACK);
+            return false;
+        }
+
+        // Apply and permanently save calibration & standard filters to NVS
+        touch.setCalibration(xMin, xMax, yMin, yMax);
+        touch.saveCalibration();
+        touch.setFilters(25, 120);
+        touch.saveFilters();
+
+        Serial.println("\n[AMK Touch] =====================================================");
+        Serial.printf("[AMK Touch] Adaptive Multi-Point Calibration Saved to NVS Flash!\n");
+        Serial.printf("[AMK Touch] Bounds: X[%u..%u], Y[%u..%u] | RMS: %.2f px | Max Err: %.2f px\n",
+                      xMin, xMax, yMin, yMax, finalRms, finalMaxErr);
+        Serial.println("[AMK Touch] =====================================================\n");
+
+        // Visual confirmation on screen
+        fillScreen(TFT_BLACK);
+        fillRoundRect(16, scrH / 2 - 30, scrW - 32, 60, 8, 0x03E0); // Emerald Green
+        drawRoundRect(16, scrH / 2 - 30, scrW - 32, 60, 8, TFT_CYAN);
+        setTextDatum(MC_DATUM);
+        setTextColor(TFT_WHITE, 0x03E0);
+        drawString("CALIBRATION SAVED TO NVS!", scrW / 2, scrH / 2 - 10, (scrW > 320) ? 2 : 1);
+        char statsBuf[64];
+        snprintf(statsBuf, sizeof(statsBuf), "RMS Error: %.1f px | Max: %.1f px", finalRms, finalMaxErr);
+        drawString(statsBuf, scrW / 2, scrH / 2 + 12, 1);
+        flashLedSequence();
+        delay(1200);
+        fillScreen(TFT_BLACK);
+
+        return true;
+#else
+        return true;
+#endif
+    }
+
+    // ── Ambient Light Auto-Dimming ──
+    void adjustBrightness() {
+        uint8_t blPin = backlightPin();
+        if (blPin == 0 || !_autoBrightnessActive || !_hasLdrSensor) return;
+
+        if (millis() - _lastLdrSampleTime > 80) {
+            _lastLdrSampleTime = millis();
+            _ldrTotal = _ldrTotal - _ldrReadings[_ldrReadIndex];
+            _ldrReadings[_ldrReadIndex] = analogRead(34);
+            _ldrTotal = _ldrTotal + _ldrReadings[_ldrReadIndex];
+            _ldrReadIndex = (_ldrReadIndex + 1) % 10;
+
+            long average = _ldrTotal / 10;
+            int target = constrain(map(average, 0, 1024, 255, 20), 20, 255);
+
+            // 4-unit hysteresis deadband prevents light sensor flicker & PWM thrashing
+            if (abs(target - _lastAppliedBrightness) >= 4) {
+                _lastAppliedBrightness = target;
+                _activeBacklightLevel = target;
+                analogWrite(blPin, target);
+            }
+        }
+    }
+
+    void setAutoBrightness(bool enable) {
+        _autoBrightnessActive = enable;
+    }
+
+    bool getAutoBrightness() const {
+        return _autoBrightnessActive;
+    }
+
+    void setBacklightBrightness(uint8_t brightness) {
+        _activeBacklightLevel = brightness;
+        _autoBrightnessActive = false;
+        uint8_t blPin = backlightPin();
+        if (blPin > 0) {
+            analogWrite(blPin, brightness);
+        }
+#if defined(AMK_BACKEND_ESP32_S3)
+        else {
+            display.setBacklight(brightness > 0 ? 100 : 0);
+        }
+#endif
+    }
+
+    // ── Universal RGB LED Control (Active-LOW Polarity) ──
+    void setRgbLed(bool redOn, bool greenOn, bool blueOn) {
+        if (_redPin >= 0)   digitalWrite(_redPin,   redOn   ? LOW : HIGH);
+        if (_greenPin >= 0) digitalWrite(_greenPin, greenOn ? LOW : HIGH);
+        if (_bluePin >= 0)  digitalWrite(_bluePin,  blueOn  ? LOW : HIGH);
+    }
+
+    void turnLedOff() {
+        setRgbLed(false, false, false);
+    }
+
+    void flashLed(bool redOn, bool greenOn, bool blueOn, uint16_t durationMs = 60) {
+        setRgbLed(redOn, greenOn, blueOn);
+        delay(durationMs);
+        turnLedOff();
+    }
+
+    void flashLedSequence() {
+        setRgbLed(true, false, false); delay(60);
+        setRgbLed(false, true, false); delay(60);
+        setRgbLed(false, false, true); delay(60);
+        turnLedOff();
+    }
+
+    // ── Hardware Query Getters ──
+    int8_t redLedPin()    const { return _redPin; }
+    int8_t greenLedPin()  const { return _greenPin; }
+    int8_t blueLedPin()   const { return _bluePin; }
+    bool   hasLdrSensor() const { return _hasLdrSensor; }
+    bool   isBattery()    const { return _isBattery; }
+
+    float readBatteryVoltage() {
+        if (!_isBattery) return 0.0f;
+        int raw = analogRead(34);
+        return (raw / 4095.0f) * 3.3f * 2.0f; // cell/2 divider
+    }
+
+    const char* modelName() const { return display.modelName(); }
+    const char* panelName() const { return display.panelName(); }
+    const AMK_BoardProfile* getBoardProfile() const { return AMK_findProfileByName(display.modelName()); }
+    int8_t getAuxLedPin() const { const AMK_BoardProfile* p = getBoardProfile(); return p ? p->pinAuxLed : -1; }
+    int8_t getAudioAmpPin() const { const AMK_BoardProfile* p = getBoardProfile(); return p ? p->pinAudioAmp : -1; }
+    uint8_t diagonalTenths() const { return display.diagonalTenths(); }
+    int16_t nativeWidth() const { return display.nativeWidth(); }
+    int16_t nativeHeight() const { return display.nativeHeight(); }
+
+    void printHardwareReport() {
+        Serial.println("\n=================================================================");
+        Serial.println("         AMK_CYD_Universal_TFT Universal Hardware Report         ");
+        Serial.println("=================================================================");
+        Serial.printf(" Board Model:         %s\n", display.modelName());
+        Serial.printf(" Display Panel:       %s\n", display.panelName());
+        Serial.printf(" Native Resolution:   %d x %d pixels\n", display.nativeWidth(), display.nativeHeight());
+        Serial.printf(" Active Resolution:   %d x %d pixels (Rotation %d)\n", width(), height(), getRotation());
+        if (display.diagonalTenths() > 0) {
+            Serial.printf(" Screen Diagonal:     %.1f inches\n", display.diagonalTenths() / 10.0f);
+        }
+        if (backlightPin() > 0) {
+            Serial.printf(" Backlight Pin:       GPIO %u (Auto-detected by library)\n", backlightPin());
+        }
+#if defined(AMK_BACKEND_ESP32_S3)
+        else {
+            Serial.println(" Backlight Pin:       CH422G I/O Expander IO2 (Auto-detected)");
+        }
+#endif
+        Serial.printf(" Backlight Control:   8-bit PWM (Active Level: %d / 255)\n", _activeBacklightLevel);
+        Serial.printf(" Color Order:         %s (Factory MADCTL verified)\n", isBGR() ? "BGR" : "RGB");
+        Serial.printf(" 16-bit Byte Swap:    %s\n", getSwapBytes() ? "Enabled (true)" : "Disabled");
+#if !defined(AMK_BACKEND_ESP32_S3)
+        Serial.printf(" SPI Bus Frequency:   %u MHz\n", (unsigned)(display.spiClock() / 1000000));
+#endif
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+        Serial.printf(" Touch Controller:    %s (%s)\n", touch.chipName(), touch.capacitive() ? "Capacitive I2C" : "Resistive SPI");
+#endif
+#if !defined(AMK_BACKEND_ESP32_S3)
+        Serial.printf(" Bus Architecture:    %s\n", display.board() == CYDR_BOARD_OWN_TOUCH ? "Dedicated Touch Bus" : "Shared Display SPI Bus");
+        Serial.printf(" Display Readback:    %s\n", getReadbackName());
+        Serial.printf(" RGB LED Pins:        Red: %d | Green: %d | Blue: %d (Active-LOW)\n", _redPin, _greenPin, _bluePin);
+        Serial.printf(" GPIO 34 Role:        %s\n", _isBattery ? "Battery Voltage Divider" : (_hasLdrSensor ? "Light Dependent Resistor (LDR)" : "Default"));
+        const char* hint = display.powerOffHint();
+        if (hint) Serial.printf(" Power-Off Hint:      %s\n", hint);
+#endif
+        const AMK_BoardProfile* prof = getBoardProfile();
+        if (prof && prof->id != AMK_BOARD_UNKNOWN) {
+            Serial.println("-----------------------------------------------------------------");
+            Serial.printf(" MCU Platform:        %s\n", prof->mcu);
+            Serial.printf(" Hardware Profile:    %s\n", prof->description);
+            if (prof->pinAuxLed >= 0) Serial.printf(" Aux / WS2812 LED:    GPIO %d\n", prof->pinAuxLed);
+            if (prof->pinAudioAmp >= 0) Serial.printf(" Audio Amp Enable:    GPIO %d\n", prof->pinAudioAmp);
+        }
+        Serial.println("=================================================================\n");
+    }
+
+    void setRotation(uint8_t r) {
+        display.setRotation(r);
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+        touch.setRotation(r);
+#endif
+    }
+    uint8_t getRotation() const       { return display.rotation(); }
+    void setSwapBytes(bool swap)      { _swapBytes = swap; }
+    bool getSwapBytes() const         { return _swapBytes;         }
+    void setBGR(bool bgr)             { display.setBGR(bgr);       }
+    bool isBGR() const                { return display.isBGR();    }
+    void setPanel(cydr_panel_t panel) { display.setPanel(panel);   }
+    cydr_panel_t getPanel() const     { return display.panel();    }
+    void setMirrorX(bool mirror)      { display.setMirrorX(mirror); }
+    bool isMirrorX() const            { return display.isMirrorX(); }
+    void setBacklight(int pct)        { display.setBacklight(pct); }
+    void setBacklightPin(uint8_t pin) { display.setBacklightPin(pin); }
+    uint8_t backlightPin() const      { return display.backlightPin(); }
+
+    // ── Universal 1-Line Image Rendering Methods (defined in AMK_Image_Decoder.h) ──
+    bool drawJpg(const uint8_t *data, uint32_t len, int16_t x, int16_t y, uint16_t maxWidth = 0, uint16_t maxHeight = 0);
+    bool drawJpgFile(fs::FS &fs, const char *path, int16_t x, int16_t y, uint16_t maxWidth = 0, uint16_t maxHeight = 0);
+    bool drawPng(const uint8_t *data, uint32_t len, int16_t x, int16_t y, uint16_t maxWidth = 0, uint16_t maxHeight = 0);
+    bool drawPngFile(fs::FS &fs, const char *path, int16_t x, int16_t y, uint16_t maxWidth = 0, uint16_t maxHeight = 0);
+    void setSpiClock(uint32_t hz) {
+#if !defined(AMK_BACKEND_ESP32_S3)
+        display.setSpiClock(hz);
+#endif
+    }
+    uint32_t getSpiClock() const {
+#if !defined(AMK_BACKEND_ESP32_S3)
+        return display.spiClock();
+#else
+        return 0;
+#endif
+    }
+    virtual int16_t width()  const    { return display.width();    }
+    virtual int16_t height() const    { return display.height();   }
+
+    virtual void fillScreen(uint16_t color) {
+#if defined(AMK_BACKEND_ESP32_S3)
+        display.fillScreen(color);
+#else
+        _fill(0, 0, width(), height(), color);
+#endif
+    }
+    void invertDisplay(bool invert)   { display.invertDisplay(invert); }
+
+    virtual uint16_t readPixel(int32_t x, int32_t y) const { (void)x; (void)y; return 0; }
+
+    virtual void drawPixel(int32_t x, int32_t y, uint16_t color) {
+        _pixel(x, y, color);
+        if (!isSprite()) display.waitFlush();
+    }
+
+    virtual void drawFastHLine(int32_t x, int32_t y, int32_t w, uint16_t color) {
+        _fill(x, y, w, 1, color);
+    }
+
+    virtual void drawFastVLine(int32_t x, int32_t y, int32_t h, uint16_t color) {
+        _fill(x, y, 1, h, color);
+    }
+
+    virtual void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color) {
+        _fill(x, y, w, h, color);
+    }
+
+    void drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color) {
+        drawFastHLine(x, y, w, color);
+        drawFastHLine(x, y + h - 1, w, color);
+        drawFastVLine(x, y, h, color);
+        drawFastVLine(x + w - 1, y, h, color);
+    }
+
+    // Circles (Bresenham)
+    void drawCircle(int32_t cx, int32_t cy, int32_t r, uint16_t color) {
+        int32_t f = 1 - r, ddx = 1, ddy = -2 * r, x = 0, y = r;
+        _pixel(cx, cy + r, color);  _pixel(cx, cy - r, color);
+        _pixel(cx + r, cy, color);  _pixel(cx - r, cy, color);
+        while (x < y) {
+            if (f >= 0) { y--; ddy += 2; f += ddy; }
+            x++; ddx += 2; f += ddx;
+            _pixel(cx + x, cy + y, color); _pixel(cx - x, cy + y, color);
+            _pixel(cx + x, cy - y, color); _pixel(cx - x, cy - y, color);
+            _pixel(cx + y, cy + x, color); _pixel(cx - y, cy + x, color);
+            _pixel(cx + y, cy - x, color); _pixel(cx - y, cy - x, color);
+        }
+        if (!isSprite()) display.waitFlush();
+    }
+
+    void fillCircle(int32_t cx, int32_t cy, int32_t r, uint16_t color) {
+        drawFastHLine(cx - r, cy, 2 * r + 1, color);
+        int32_t f = 1 - r, ddx = 1, ddy = -2 * r, x = 0, y = r;
+        while (x < y) {
+            if (f >= 0) { y--; ddy += 2; f += ddy; }
+            x++; ddx += 2; f += ddx;
+            drawFastHLine(cx - x, cy + y, 2 * x + 1, color);
+            drawFastHLine(cx - x, cy - y, 2 * x + 1, color);
+            drawFastHLine(cx - y, cy + x, 2 * y + 1, color);
+            drawFastHLine(cx - y, cy - x, 2 * y + 1, color);
+        }
+    }
+
+    // Ellipses (Midpoint)
+    void drawEllipse(int32_t cx, int32_t cy, int32_t rx, int32_t ry, uint16_t color) {
+        if (rx <= 0 || ry <= 0) return;
+        int32_t x = 0, y = ry;
+        int64_t rx2 = (int64_t)rx * rx;
+        int64_t ry2 = (int64_t)ry * ry;
+        int64_t fx2 = 4 * rx2;
+        int64_t fy2 = 4 * ry2;
+        int64_t s = 2 * ry2 + rx2 * (1 - 2 * ry);
+        do {
+            _pixel(cx + x, cy + y, color);
+            _pixel(cx - x, cy + y, color);
+            _pixel(cx - x, cy - y, color);
+            _pixel(cx + x, cy - y, color);
+            if (s >= 0) { s += fx2 * (1 - y); y--; }
+            s += ry2 * ((4 * x) + 6);
+            x++;
+        } while (fx2 * y > fy2 * x);
+
+        s = 2 * rx2 + ry2 * (1 - 2 * x);
+        do {
+            _pixel(cx + x, cy + y, color);
+            _pixel(cx - x, cy + y, color);
+            _pixel(cx - x, cy - y, color);
+            _pixel(cx + x, cy - y, color);
+            if (s >= 0) { s += fy2 * (1 - x); x--; }
+            s += rx2 * ((4 * y) + 6);
+            y--;
+        } while (y >= 0);
+        if (!isSprite()) display.waitFlush();
+    }
+
+    void fillEllipse(int32_t cx, int32_t cy, int32_t rx, int32_t ry, uint16_t color) {
+        if (rx <= 0 || ry <= 0) return;
+        int32_t x = 0, y = ry;
+        int64_t rx2 = (int64_t)rx * rx;
+        int64_t ry2 = (int64_t)ry * ry;
+        int64_t fx2 = 4 * rx2;
+        int64_t fy2 = 4 * ry2;
+        int64_t s = 2 * ry2 + rx2 * (1 - 2 * ry);
+        do {
+            drawFastHLine(cx - x, cy + y, 2 * x + 1, color);
+            drawFastHLine(cx - x, cy - y, 2 * x + 1, color);
+            if (s >= 0) { s += fx2 * (1 - y); y--; }
+            s += ry2 * ((4 * x) + 6);
+            x++;
+        } while (fx2 * y > fy2 * x);
+
+        s = 2 * rx2 + ry2 * (1 - 2 * x);
+        do {
+            drawFastHLine(cx - x, cy + y, 2 * x + 1, color);
+            drawFastHLine(cx - x, cy - y, 2 * x + 1, color);
+            if (s >= 0) { s += fy2 * (1 - x); x--; }
+            s += rx2 * ((4 * y) + 6);
+            y--;
+        } while (y >= 0);
+    }
+
+    // Rounded rects
+    void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h,
+                       int32_t r, uint16_t color) {
+        if (w <= 0 || h <= 0) return;
+        if (r <= 0) { fillRect(x, y, w, h, color); return; }
+        if (r > w / 2) r = w / 2;
+        if (r > h / 2) r = h / 2;
+
+        fillRect(x, y + r, w, h - 2 * r, color);
+
+        for (int32_t dy = 0; dy < r; dy++) {
+            int32_t dx = (int32_t)sqrtf((float)((int64_t)r*r -
+                                                 (int64_t)(r - dy)*(r - dy)));
+            int32_t fx = x + r - dx;
+            int32_t fw = w - 2 * (r - dx);
+            if (fw > 0) {
+                drawFastHLine(fx, y + dy,         fw, color);
+                drawFastHLine(fx, y + h - 1 - dy, fw, color);
+            }
+        }
+    }
+
+    void drawRoundRect(int32_t x, int32_t y, int32_t w, int32_t h,
+                       int32_t r, uint16_t color) {
+        if (w <= 0 || h <= 0) return;
+        if (r <= 0) { drawRect(x, y, w, h, color); return; }
+        if (r > w / 2) r = w / 2;
+        if (r > h / 2) r = h / 2;
+
+        drawFastHLine(x + r, y,         w - 2*r, color);
+        drawFastHLine(x + r, y + h - 1, w - 2*r, color);
+        drawFastVLine(x,         y + r, h - 2*r, color);
+        drawFastVLine(x + w - 1, y + r, h - 2*r, color);
+
+        int32_t f = 1 - r, ddx = 1, ddy = -2 * r, xi = 0, yi = r;
+        while (xi < yi) {
+            if (f >= 0) { yi--; ddy += 2; f += ddy; }
+            xi++; ddx += 2; f += ddx;
+            _pixel(x + r - xi,         y + r - yi,         color);
+            _pixel(x + r - yi,         y + r - xi,         color);
+            _pixel(x + w - 1 - r + xi, y + r - yi,         color);
+            _pixel(x + w - 1 - r + yi, y + r - xi,         color);
+            _pixel(x + r - xi,         y + h - 1 - r + yi, color);
+            _pixel(x + r - yi,         y + h - 1 - r + xi, color);
+            _pixel(x + w - 1 - r + xi, y + h - 1 - r + yi, color);
+            _pixel(x + w - 1 - r + yi, y + h - 1 - r + xi, color);
+        }
+        if (!isSprite()) display.waitFlush();
+    }
+
+    // Line (Bresenham)
+    void drawLine(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t color) {
+        int32_t dx = abs(x1 - x0), dy = abs(y1 - y0);
+        int32_t sx = (x0 < x1) ? 1 : -1;
+        int32_t sy = (y0 < y1) ? 1 : -1;
+        int32_t err = dx - dy;
+        for (;;) {
+            _pixel(x0, y0, color);
+            if (x0 == x1 && y0 == y1) break;
+            int32_t e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x0 += sx; }
+            if (e2 <  dx) { err += dx; y0 += sy; }
+        }
+        if (!isSprite()) display.waitFlush();
+    }
+
+    // Triangle primitives
+    void drawTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint16_t color) {
+        drawLine(x0, y0, x1, y1, color);
+        drawLine(x1, y1, x2, y2, color);
+        drawLine(x2, y2, x0, y0, color);
+    }
+
+    void fillTriangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint16_t color) {
+        int32_t a, b, y, last;
+        if (y0 > y1) { std::swap(y0, y1); std::swap(x0, x1); }
+        if (y1 > y2) { std::swap(y2, y1); std::swap(x2, x1); }
+        if (y0 > y1) { std::swap(y0, y1); std::swap(x0, x1); }
+
+        if (y0 == y2) {
+            a = b = x0;
+            if (x1 < a)      a = x1;
+            else if (x1 > b) b = x1;
+            if (x2 < a)      a = x2;
+            else if (x2 > b) b = x2;
+            drawFastHLine(a, y0, b - a + 1, color);
+            return;
+        }
+
+        int32_t dx01 = x1 - x0, dy01 = y1 - y0;
+        int32_t dx02 = x2 - x0, dy02 = y2 - y0;
+        int32_t dx12 = x2 - x1, dy12 = y2 - y1;
+        int32_t sa = 0, sb = 0;
+
+        if (y1 == y2) last = y1;
+        else         last = y1 - 1;
+
+        for (y = y0; y <= last; y++) {
+            a = x0 + sa / dy01;
+            b = x0 + sb / dy02;
+            sa += dx01;
+            sb += dx02;
+            if (a > b) std::swap(a, b);
+            drawFastHLine(a, y, b - a + 1, color);
+        }
+
+        sa = dx12 * (y - y1);
+        sb = dx02 * (y - y0);
+        for (; y <= y2; y++) {
+            a = x1 + sa / dy12;
+            b = x0 + sb / dy02;
+            sa += dx12;
+            sb += dx02;
+            if (a > b) std::swap(a, b);
+            drawFastHLine(a, y, b - a + 1, color);
+        }
+    }
+
+    // Wide and wedge lines
+    void drawWideLine(float ax, float ay, float bx, float by, float wd, uint16_t fgcolor, uint16_t bgcolor = 0xFFFF) {
+        (void)bgcolor;
+        if (wd <= 1.0f) {
+            drawLine((int32_t)roundf(ax), (int32_t)roundf(ay), (int32_t)roundf(bx), (int32_t)roundf(by), fgcolor);
+            return;
+        }
+        float dx = bx - ax;
+        float dy = by - ay;
+        float len = sqrtf(dx * dx + dy * dy);
+        if (len == 0.0f) {
+            fillCircle((int32_t)roundf(ax), (int32_t)roundf(ay), (int32_t)(wd / 2.0f), fgcolor);
+            return;
+        }
+        float halfW = wd / (2.0f * len);
+        float px = -dy * halfW;
+        float py =  dx * halfW;
+
+        int32_t x0 = (int32_t)roundf(ax + px), y0 = (int32_t)roundf(ay + py);
+        int32_t x1 = (int32_t)roundf(ax - px), y1 = (int32_t)roundf(ay - py);
+        int32_t x2 = (int32_t)roundf(bx - px), y2 = (int32_t)roundf(by - py);
+        int32_t x3 = (int32_t)roundf(bx + px), y3 = (int32_t)roundf(by + py);
+
+        fillTriangle(x0, y0, x1, y1, x2, y2, fgcolor);
+        fillTriangle(x0, y0, x2, y2, x3, y3, fgcolor);
+    }
+
+    void drawWedgeLine(float ax, float ay, float bx, float by, float aw, float bw, uint16_t fgcolor, uint16_t bgcolor = 0xFFFF) {
+        (void)bgcolor;
+        float dx = bx - ax;
+        float dy = by - ay;
+        float len = sqrtf(dx * dx + dy * dy);
+        if (len == 0.0f) {
+            fillCircle((int32_t)roundf(ax), (int32_t)roundf(ay), (int32_t)(aw / 2.0f), fgcolor);
+            return;
+        }
+        float invLen = 1.0f / len;
+        float pxA = -dy * (aw * 0.5f * invLen);
+        float pyA =  dx * (aw * 0.5f * invLen);
+        float pxB = -dy * (bw * 0.5f * invLen);
+        float pyB =  dx * (bw * 0.5f * invLen);
+
+        int32_t x0 = (int32_t)roundf(ax + pxA), y0 = (int32_t)roundf(ay + pyA);
+        int32_t x1 = (int32_t)roundf(ax - pxA), y1 = (int32_t)roundf(ay - pyA);
+        int32_t x2 = (int32_t)roundf(bx - pxB), y2 = (int32_t)roundf(by - pyB);
+        int32_t x3 = (int32_t)roundf(bx + pxB), y3 = (int32_t)roundf(by + pyB);
+
+        fillTriangle(x0, y0, x1, y1, x2, y2, fgcolor);
+        fillTriangle(x0, y0, x2, y2, x3, y3, fgcolor);
+    }
+
+    // Image rendering
+    virtual void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data) {
+        if (!data || w <= 0 || h <= 0) return;
+#if defined(AMK_BACKEND_ESP32_S3)
+        if (_swapBytes) {
+            int16_t sw = width(), sh = height();
+            if (x >= sw || y >= sh || x + w <= 0 || y + h <= 0) return;
+            alignas(4) static uint16_t _imgLineBuf[800];
+            for (int32_t row = 0; row < h; row++) {
+                int32_t curY = y + row;
+                if (curY < 0 || curY >= sh) continue;
+                int32_t srcStart = 0, dstX = x, curW = w;
+                if (dstX < 0) { srcStart = -dstX; curW += dstX; dstX = 0; }
+                if (dstX + curW > sw) curW = sw - dstX;
+                if (curW <= 0) continue;
+                const uint16_t *srcLine = data + (row * w) + srcStart;
+                for (int32_t i = 0; i < curW; i++) _imgLineBuf[i] = __builtin_bswap16(srcLine[i]);
+                display.pushImage(dstX, curY, curW, 1, _imgLineBuf);
+            }
+        } else {
+            display.pushImage(x, y, w, h, data);
+        }
+#else
+        int16_t sw = width(), sh = height();
+        if (x >= sw || y >= sh || x + w <= 0 || y + h <= 0) return;
+
+        alignas(4) static uint16_t _imgLineBuf[800];
+        for (int32_t row = 0; row < h; row++) {
+            int32_t curY = y + row;
+            if (curY < 0 || curY >= sh) continue;
+
+            int32_t srcStart = 0;
+            int32_t dstX = x;
+            int32_t curW = w;
+            if (dstX < 0) {
+                srcStart = -dstX;
+                curW += dstX;
+                dstX = 0;
+            }
+            if (dstX + curW > sw) curW = sw - dstX;
+            if (curW <= 0) continue;
+
+            display.waitFlush();
+            const uint16_t *srcLine = data + (row * w) + srcStart;
+            for (int32_t i = 0; i < curW; i++) {
+                _imgLineBuf[i] = _swapBytes ? __builtin_bswap16(srcLine[i]) : srcLine[i];
+            }
+            display.flushRegion(dstX, curY, dstX + curW - 1, curY, _imgLineBuf);
+        }
+        display.waitFlush();
+#endif
+    }
+
+    virtual void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *data) {
+        pushImage(x, y, w, h, (const uint16_t*)data);
+    }
+
+    virtual void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *data, uint16_t transparent) {
+        if (!data || w <= 0 || h <= 0) return;
+        int16_t sw = width(), sh = height();
+        for (int32_t row = 0; row < h; row++) {
+            int32_t curY = y + row;
+            if (curY < 0 || curY >= sh) continue;
+            for (int32_t col = 0; col < w; col++) {
+                int32_t curX = x + col;
+                if (curX < 0 || curX >= sw) continue;
+                uint16_t colr = data[row * w + col];
+                if (_swapBytes) colr = __builtin_bswap16(colr);
+                if (colr != transparent) {
+                    drawPixel(curX, curY, colr);
+                }
+            }
+        }
+        if (!isSprite()) display.waitFlush();
+    }
+
+    virtual void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t *data, uint16_t transparent) {
+        pushImage(x, y, w, h, (const uint16_t*)data, transparent);
+    }
+
+    // Text & cursor
+    void setCursor(int16_t x, int16_t y) {
+        _cursorX = x;
+        _cursorY = y;
+    }
+    void setCursor(int16_t x, int16_t y, uint8_t font) {
+        _cursorX = x;
+        _cursorY = y;
+        if (font > 0) _textSize = (font > 8) ? 8 : font;
+    }
+    int16_t getCursorX() const { return _cursorX; }
+    int16_t getCursorY() const { return _cursorY; }
+
+    void setTextColor(uint16_t fg)               { _textFg = fg; _textBg = fg; }
+    void setTextColor(uint16_t fg, uint16_t bg)  { _textFg = fg; _textBg = bg; }
+    void setTextSize(uint8_t s)                  { _textSize = (s > 0) ? s : 1; }
+    void setTextFont(uint8_t f)                  { _gfxFont = nullptr; if (f > 0) _textSize = (f > 8) ? 8 : f; }
+    void setTextDatum(uint8_t d)                 { _textDatum = d; }
+    uint8_t getTextDatum() const                 { return _textDatum; }
+    uint8_t getTextSize() const                  { return _textSize; }
+    void setTextWrap(bool wrap)                  { _textWrap = wrap; }
+    void setTextWrap(bool wrapX, bool wrapY)     { _textWrap = wrapX; (void)wrapY; }
+    void setTextPadding(uint16_t padding)        { _textPadding = padding; }
+    uint16_t getTextPadding() const              { return _textPadding; }
+
+    void setFreeFont(const GFXfont *f = nullptr) {
+        _gfxFont = f;
+        _glyph_ab = 0;
+        _glyph_bb = 0;
+        if (!_gfxFont) return;
+        uint16_t first = pgm_read_word(&_gfxFont->first);
+        uint16_t last  = pgm_read_word(&_gfxFont->last);
+        if (last < first) return;
+        uint16_t numChars = last - first + 1;
+        const GFXglyph* glyphs = (const GFXglyph*)pgm_read_ptr(&_gfxFont->glyph);
+        for (uint16_t i = 0; i < numChars; i++) {
+            int8_t ab = -(int8_t)pgm_read_byte(&glyphs[i].yOffset);
+            if (ab > _glyph_ab) _glyph_ab = ab;
+            int8_t bb = (int8_t)pgm_read_byte(&glyphs[i].height) - ab;
+            if (bb > _glyph_bb) _glyph_bb = bb;
+        }
+    }
+    const GFXfont* getFreeFont() const { return _gfxFont; }
+
+    int16_t drawString(const char* str, int32_t x, int32_t y, uint8_t font = 0) {
+        if (!str) return 0;
+        uint8_t scale = (font > 0) ? font : _textSize;
+        if (scale == 0) scale = 1;
+        if (scale > 8) scale = 8;
+
+        if (_gfxFont && font == 0) {
+            int16_t tw = textWidth(str, 0);
+            int16_t cheight = _glyph_ab * scale;
+            int16_t th = (_glyph_ab + _glyph_bb) * scale;
+            int32_t baselineY = y + cheight;
+
+            switch (_textDatum) {
+                case TC_DATUM: x -= tw / 2; break;
+                case TR_DATUM: x -= tw;     break;
+                case ML_DATUM: baselineY = y + (_glyph_ab - _glyph_bb) * scale / 2; break;
+                case MC_DATUM: x -= tw / 2; baselineY = y + (_glyph_ab - _glyph_bb) * scale / 2; break;
+                case MR_DATUM: x -= tw;     baselineY = y + (_glyph_ab - _glyph_bb) * scale / 2; break;
+                case BL_DATUM: baselineY = y - _glyph_bb * scale; break;
+                case BC_DATUM: x -= tw / 2; baselineY = y - _glyph_bb * scale; break;
+                case BR_DATUM: x -= tw;     baselineY = y - _glyph_bb * scale; break;
+                default: break; // TL_DATUM
+            }
+
+            int32_t padX = x;
+            int16_t padW = tw;
+            if (_textPadding > tw) {
+                padW = _textPadding;
+                if (_textDatum == TC_DATUM || _textDatum == MC_DATUM || _textDatum == BC_DATUM) {
+                    padX = x - (padW - tw) / 2;
+                } else if (_textDatum == TR_DATUM || _textDatum == MR_DATUM || _textDatum == BR_DATUM) {
+                    padX = x - (padW - tw);
+                }
+            }
+
+            if (_textBg != TFT_TRANSPARENT && _textFg != _textBg) {
+                fillRect(padX, baselineY - cheight, padW, th, _textBg);
+            }
+
+            int32_t curX = x;
+            size_t len = strlen(str);
+            for (size_t i = 0; i < len; i++) {
+                curX += _drawCharGFX(curX, baselineY, (unsigned char)str[i], _textFg, _textBg, scale);
+            }
+            if (!isSprite()) display.waitFlush();
+            return tw;
+        }
+
+        int len = (int)strlen(str);
+        int16_t tw = len * 6 * scale;
+        int16_t th = 8 * scale;
+
+        switch (_textDatum) {
+            case TC_DATUM: x -= tw / 2; break;
+            case TR_DATUM: x -= tw;     break;
+            case ML_DATUM:               y -= th / 2; break;
+            case MC_DATUM: x -= tw / 2; y -= th / 2; break;
+            case MR_DATUM: x -= tw;     y -= th / 2; break;
+            case BL_DATUM:               y -= th;     break;
+            case BC_DATUM: x -= tw / 2; y -= th;     break;
+            case BR_DATUM: x -= tw;     y -= th;     break;
+            default: break;  // TL_DATUM
+        }
+
+        if (_textPadding > tw && _textBg != TFT_TRANSPARENT && _textFg != _textBg) {
+            int16_t padW = _textPadding - tw;
+            int32_t padX = x + tw;
+            if (_textDatum == TC_DATUM || _textDatum == MC_DATUM || _textDatum == BC_DATUM) {
+                int16_t half = padW / 2;
+                fillRect(x - half, y, half, th, _textBg);
+                fillRect(padX, y, padW - half, th, _textBg);
+            } else if (_textDatum == TR_DATUM || _textDatum == MR_DATUM || _textDatum == BR_DATUM) {
+                fillRect(x - padW, y, padW, th, _textBg);
+            } else {
+                fillRect(padX, y, padW, th, _textBg);
+            }
+        }
+
+        for (int i = 0; i < len; i++)
+            _drawChar(x + i * 6 * scale, y, str[i], _textFg, _textBg, scale);
+        if (!isSprite()) display.waitFlush();
+        return tw;
+    }
+
+    int16_t drawString(const String &s, int32_t x, int32_t y, uint8_t font = 0) {
+        return drawString(s.c_str(), x, y, font);
+    }
+
+    int16_t drawCentreString(const char* str, int32_t x, int32_t y, uint8_t font = 0) {
+        uint8_t prev = _textDatum;
+        _textDatum = TC_DATUM;
+        int16_t w = drawString(str, x, y, font);
+        _textDatum = prev;
+        return w;
+    }
+    int16_t drawCentreString(const String &s, int32_t x, int32_t y, uint8_t font = 0) {
+        return drawCentreString(s.c_str(), x, y, font);
+    }
+
+    int16_t drawRightString(const char* str, int32_t x, int32_t y, uint8_t font = 0) {
+        uint8_t prev = _textDatum;
+        _textDatum = TR_DATUM;
+        int16_t w = drawString(str, x, y, font);
+        _textDatum = prev;
+        return w;
+    }
+    int16_t drawRightString(const String &s, int32_t x, int32_t y, uint8_t font = 0) {
+        return drawRightString(s.c_str(), x, y, font);
+    }
+
+    int16_t drawNumber(long int_num, int32_t poX, int32_t poY, uint8_t font = 0) {
+        char buf[32];
+        ltoa(int_num, buf, 10);
+        return drawString(buf, poX, poY, font);
+    }
+
+    int16_t drawFloat(float floatNumber, uint8_t decimal, int32_t poX, int32_t poY, uint8_t font = 0) {
+        char buf[32];
+        dtostrf(floatNumber, 0, decimal, buf);
+        return drawString(buf, poX, poY, font);
+    }
+
+    int16_t textWidth(const char* str, uint8_t font = 0) const {
+        if (!str) return 0;
+        uint8_t scale = (font > 0) ? font : _textSize;
+        if (scale == 0) scale = 1;
+        if (scale > 8) scale = 8;
+
+        if (_gfxFont && font == 0) {
+            int16_t w = 0;
+            uint16_t first = pgm_read_word(&_gfxFont->first);
+            uint16_t last  = pgm_read_word(&_gfxFont->last);
+            const GFXglyph* glyphs = (const GFXglyph*)pgm_read_ptr(&_gfxFont->glyph);
+            const char* p = str;
+            while (*p) {
+                uint8_t c = (uint8_t)*p++;
+                if (c >= first && c <= last) {
+                    uint16_t idx = c - first;
+                    uint8_t xa = pgm_read_byte(&glyphs[idx].xAdvance);
+                    if (*p) {
+                        w += xa;
+                    } else {
+                        int8_t xo = (int8_t)pgm_read_byte(&glyphs[idx].xOffset);
+                        uint8_t gw = pgm_read_byte(&glyphs[idx].width);
+                        w += (xa > (xo + gw)) ? xa : (xo + gw);
+                    }
+                }
+            }
+            return w * scale;
+        }
+
+        return (int16_t)(strlen(str) * 6 * scale);
+    }
+    int16_t textWidth(const String &s, uint8_t font = 0) const {
+        return textWidth(s.c_str(), font);
+    }
+
+    int16_t fontHeight(uint8_t font = 0) const {
+        uint8_t scale = (font > 0) ? font : _textSize;
+        if (scale == 0) scale = 1;
+        if (scale > 8) scale = 8;
+        if (_gfxFont && font == 0) {
+            return (int16_t)(pgm_read_byte(&_gfxFont->yAdvance) * scale);
+        }
+        return (int16_t)(8 * scale);
+    }
+
+    // Pivot support
+    void setPivot(int16_t x, int16_t y) { _pivotX = x; _pivotY = y; }
+    int16_t getPivotX() const           { return _pivotX; }
+    int16_t getPivotY() const           { return _pivotY; }
+
+    // Color conversion & blending
+    static inline uint16_t color565(uint8_t r, uint8_t g, uint8_t b) {
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    }
+    static inline uint16_t color24to16(uint32_t c) {
+        return color565((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+    }
+    static inline uint32_t color16to24(uint16_t c) {
+        uint8_t r = (c >> 8) & 0xF8; r |= (r >> 5);
+        uint8_t g = (c >> 3) & 0xFC; g |= (g >> 6);
+        uint8_t b = (c << 3) & 0xF8; b |= (b >> 5);
+        return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+    }
+    static inline uint8_t color16to8(uint16_t c) {
+        return (uint8_t)(((c & 0xE000) >> 8) | ((c & 0x0700) >> 6) | ((c & 0x0018) >> 3));
+    }
+    static inline uint16_t color8to16(uint8_t c) {
+        uint16_t r = (c >> 5) & 0x07, g = (c >> 2) & 0x07, b = c & 0x03;
+        uint16_t r5 = (r << 2) | (r >> 1);
+        uint16_t g6 = (g << 3) | g;
+        uint16_t b5 = (b << 3) | (b << 1) | (b >> 1);
+        return (r5 << 11) | (g6 << 5) | b5;
+    }
+    static inline uint16_t alphaBlend(uint8_t alpha, uint16_t fgc, uint16_t bgc) {
+        uint32_t rxb = bgc & 0xF81F;
+        rxb += ((fgc & 0xF81F) - rxb) * (alpha >> 2) >> 6;
+        uint32_t xgx = bgc & 0x07E0;
+        xgx += ((fgc & 0x07E0) - xgx) * alpha >> 8;
+        return (uint16_t)((rxb & 0xF81F) | (xgx & 0x07E0));
+    }
+
+    // Gradients
+    void fillRectVGradient(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color1, uint16_t color2) {
+        if (w <= 0 || h <= 0) return;
+        float delta = -255.0f / (float)h;
+        float alpha = 255.0f;
+        while (h--) {
+            drawFastHLine(x, y++, w, alphaBlend((uint8_t)alpha, color1, color2));
+            alpha += delta;
+        }
+    }
+
+    void fillRectHGradient(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color1, uint16_t color2) {
+        if (w <= 0 || h <= 0) return;
+        float delta = -255.0f / (float)w;
+        float alpha = 255.0f;
+        while (w--) {
+            drawFastVLine(x++, y, h, alphaBlend((uint8_t)alpha, color1, color2));
+            alpha += delta;
+        }
+    }
+
+    void drawGradientV(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color1, uint16_t color2) {
+        fillRectVGradient(x, y, w, h, color1, color2);
+    }
+    void drawGradientH(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color1, uint16_t color2) {
+        fillRectHGradient(x, y, w, h, color1, color2);
+    }
+
+#ifndef AMK_CYD_NO_GLOBAL_TOUCH
+    bool getTouch(uint16_t *x, uint16_t *y, uint16_t threshold = 600) {
+        (void)threshold;
+        if (!x || !y) return false;
+        return touch.read(*x, *y);
+    }
+    bool getTouchRaw(uint16_t *x, uint16_t *y) {
+        if (!x || !y) return false;
+        return touch.readRaw(*x, *y);
+    }
+    uint16_t getTouchRawZ() {
+        return touch.pressure();
+    }
+    bool isCapacitive() const {
+        return touch.capacitive();
+    }
+    const char* getTouchChipName() const {
+        return touch.chipName();
+    }
+    void setTouch(uint16_t *parameters) {
+        if (!parameters) return;
+        touch.setCalibration(parameters[0], parameters[1], parameters[2], parameters[3]);
+    }
+    void calibrateTouch(uint16_t *parameters, uint16_t color_fg = TFT_WHITE, uint16_t color_bg = TFT_BLACK, uint8_t size = 15) {
+        if (!parameters) return;
+        if (touch.capacitive()) {
+            parameters[0] = 0; parameters[1] = width();
+            parameters[2] = 0; parameters[3] = height();
+            parameters[4] = 0;
+            return;
+        }
+        autoCalibrate(true);
+        uint16_t x0, x1, y0, y1;
+        touch.getCalibration(x0, x1, y0, y1);
+        parameters[0] = x0;
+        parameters[1] = x1;
+        parameters[2] = y0;
+        parameters[3] = y1;
+        parameters[4] = 0;
+    }
+#endif
+
+    const char* getModelName() const {
+        return display.modelName();
+    }
+    const char* getPanelName() const {
+        return display.panelName();
+    }
+    uint8_t getDiagonalTenths() const {
+        return display.diagonalTenths();
+    }
+    bool isReadbackSupported() const {
+#if defined(AMK_BACKEND_ESP32_S3)
+        return true;
+#else
+        return display.readback() != CYDR_READBACK_NONE;
+#endif
+    }
+    const char* getReadbackName() const {
+#if defined(AMK_BACKEND_ESP32_S3)
+        return "Internal Framebuffer";
+#else
+        return display.readbackName();
+#endif
+    }
+
+    // Print interface
+    virtual size_t write(uint8_t c) override {
+        if (c == '\r') {
+            _cursorX = 0;
+            return 1;
+        }
+        if (c == '\n') {
+            _cursorX = 0;
+            _cursorY += fontHeight();
+            return 1;
+        }
+        uint8_t scale = _textSize;
+        if (scale == 0) scale = 1;
+        if (scale > 8) scale = 8;
+
+        if (_gfxFont) {
+            uint16_t first = pgm_read_word(&_gfxFont->first);
+            uint16_t last  = pgm_read_word(&_gfxFont->last);
+            if (c >= first && c <= last) {
+                uint16_t idx = c - first;
+                const GFXglyph* glyphs = (const GFXglyph*)pgm_read_ptr(&_gfxFont->glyph);
+                uint8_t xa = pgm_read_byte(&glyphs[idx].xAdvance);
+                int16_t cw = xa * scale;
+                if (_textWrap && (_cursorX + cw > width())) {
+                    _cursorX = 0;
+                    _cursorY += fontHeight();
+                }
+                _drawCharGFX(_cursorX, _cursorY, c, _textFg, _textBg, scale);
+                _cursorX += cw;
+                if (!isSprite()) display.waitFlush();
+            }
+            return 1;
+        }
+
+        int16_t cw = 6 * scale;
+        int16_t ch = 8 * scale;
+        if (_textWrap && (_cursorX + cw > width())) {
+            _cursorX = 0;
+            _cursorY += ch;
+        }
+        _drawChar(_cursorX, _cursorY, c, _textFg, _textBg, scale);
+        _cursorX += cw;
+        if (!isSprite()) display.waitFlush();
+        return 1;
+    }
+
+    virtual size_t write(const uint8_t *buffer, size_t size) override {
+        if (!buffer || size == 0) return 0;
+        size_t n = 0;
+        while (size--) {
+            if (write(*buffer++)) n++;
+            else break;
+        }
+        return n;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TFT_eSprite  -  Full off-screen canvas / frame buffer (16-bit, 8-bit, 4-bit)
+// ═══════════════════════════════════════════════════════════════════════════════
+class TFT_eSprite : public TFT_eSPI {
+private:
+    TFT_eSPI* _tft = nullptr;
+    int16_t   _w = 0;
+    int16_t   _h = 0;
+    uint8_t   _bpp = 16;
+    uint8_t*  _buffer = nullptr;
+    bool      _isCreated = false;
+    uint16_t  _palette[16];
+    uint8_t   _rotation = 0;
+
+    static inline uint8_t color565to332(uint16_t c) {
+        return (uint8_t)(((c & 0xE000) >> 8) | ((c & 0x0700) >> 6) | ((c & 0x0018) >> 3));
+    }
+
+    static inline uint16_t color332to565(uint8_t c) {
+        uint16_t r = (c >> 5) & 0x07, g = (c >> 2) & 0x07, b = c & 0x03;
+        uint16_t r5 = (r << 2) | (r >> 1);
+        uint16_t g6 = (g << 3) | g;
+        uint16_t b5 = (b << 3) | (b << 1) | (b >> 1);
+        return (r5 << 11) | (g6 << 5) | b5;
+    }
+
+    uint8_t _mapColorTo4Bit(uint16_t color) const {
+        if (color < 16) return (uint8_t)color;
+        for (uint8_t i = 0; i < 16; i++) {
+            if (_palette[i] == color) return i;
+        }
+        int r1 = (color >> 11) & 0x1F, g1 = (color >> 5) & 0x3F, b1 = color & 0x1F;
+        uint8_t bestIdx = 0;
+        int bestDist = 999999;
+        for (uint8_t i = 0; i < 16; i++) {
+            int r2 = (_palette[i] >> 11) & 0x1F;
+            int g2 = (_palette[i] >> 5) & 0x3F;
+            int b2 = _palette[i] & 0x1F;
+            int dr = r1 - r2, dg = (g1 - g2) >> 1, db = b1 - b2;
+            int dist = dr * dr + dg * dg + db * db;
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
+                if (dist == 0) break;
+            }
+        }
+        return bestIdx;
+    }
+
+protected:
+    void _pixel(int32_t x, int32_t y, uint16_t color) override {
+        if (!_isCreated || !_buffer) return;
+        if (x < 0 || y < 0 || x >= _w || y >= _h) return;
+        if (_bpp == 16) {
+            ((uint16_t*)_buffer)[y * _w + x] = color;
+        } else if (_bpp == 8) {
+            _buffer[y * _w + x] = color565to332(color);
+        } else {
+            uint8_t idx = _mapColorTo4Bit(color);
+            size_t byteIdx = ((size_t)y * _w + x) >> 1;
+            if ((x & 1) == 0) {
+                _buffer[byteIdx] = (_buffer[byteIdx] & 0x0F) | (idx << 4);
+            } else {
+                _buffer[byteIdx] = (_buffer[byteIdx] & 0xF0) | (idx & 0x0F);
+            }
+        }
+    }
+
+    void _fill(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color) override {
+        if (!_isCreated || !_buffer || w <= 0 || h <= 0) return;
+        if (x < 0) { w += x; x = 0; }
+        if (y < 0) { h += y; y = 0; }
+        if (x + w > _w) w = _w - x;
+        if (y + h > _h) h = _h - y;
+        if (w <= 0 || h <= 0) return;
+
+        if (_bpp == 16) {
+            for (int32_t row = 0; row < h; row++) {
+                uint16_t* line = ((uint16_t*)_buffer) + (y + row) * _w + x;
+                for (int32_t col = 0; col < w; col++) line[col] = color;
+            }
+        } else if (_bpp == 8) {
+            uint8_t c8 = color565to332(color);
+            for (int32_t row = 0; row < h; row++) {
+                uint8_t* line = _buffer + (y + row) * _w + x;
+                memset(line, c8, w);
+            }
+        } else {
+            uint8_t idx = _mapColorTo4Bit(color);
+            for (int32_t row = 0; row < h; row++) {
+                for (int32_t col = 0; col < w; col++) {
+                    int32_t curX = x + col;
+                    size_t byteIdx = ((size_t)(y + row) * _w + curX) >> 1;
+                    if ((curX & 1) == 0) {
+                        _buffer[byteIdx] = (_buffer[byteIdx] & 0x0F) | (idx << 4);
+                    } else {
+                        _buffer[byteIdx] = (_buffer[byteIdx] & 0xF0) | (idx & 0x0F);
+                    }
+                }
+            }
+        }
+    }
+
+public:
+    explicit TFT_eSprite(TFT_eSPI* tft = nullptr) : _tft(tft) {
+        for (int i = 0; i < 16; i++) _palette[i] = 0;
+    }
+    virtual ~TFT_eSprite() override { deleteSprite(); }
+
+    bool isSprite() const override { return true; }
+    int16_t width()  const override { return _w; }
+    int16_t height() const override { return _h; }
+
+    void* setColorDepth(int8_t b) {
+        _bpp = (b == 4 || b == 8) ? b : 16;
+        if (_isCreated && _w > 0 && _h > 0) {
+            int16_t w = _w, h = _h;
+            return createSprite(w, h);
+        }
+        return (void*)_buffer;
+    }
+
+    uint8_t getColorDepth() const { return _bpp; }
+
+    void createPalette(const uint16_t* cmap = nullptr, uint8_t colors = 16) {
+        if (cmap) {
+            uint8_t count = (colors > 16) ? 16 : colors;
+            for (uint8_t i = 0; i < count; i++) _palette[i] = cmap[i];
+        }
+    }
+
+    void setPaletteColor(uint8_t index, uint16_t color) {
+        if (index < 16) _palette[index] = color;
+    }
+
+    uint16_t getPaletteColor(uint8_t index) const {
+        return (index < 16) ? _palette[index] : 0;
+    }
+
+    void* createSprite(int16_t w, int16_t h, uint8_t frames = 1) {
+        (void)frames;
+        deleteSprite();
+        if (w <= 0 || h <= 0) return nullptr;
+        _w = w;
+        _h = h;
+        _pivotX = w / 2;
+        _pivotY = h / 2;
+
+        size_t bytes = 0;
+        if (_bpp == 16) bytes = (size_t)_w * _h * sizeof(uint16_t);
+        else if (_bpp == 8) bytes = (size_t)_w * _h;
+        else bytes = ((size_t)_w * _h + 1) / 2;
+
+        _buffer = (uint8_t*)heap_caps_malloc(bytes, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
+        if (!_buffer) _buffer = (uint8_t*)malloc(bytes);
+
+        if (_buffer) {
+            memset(_buffer, 0, bytes);
+            _isCreated = true;
+            return (void*)_buffer;
+        }
+        _isCreated = false;
+        _w = 0; _h = 0;
+        return nullptr;
+    }
+
+    bool created() const { return _isCreated && (_buffer != nullptr); }
+
+    void deleteSprite() {
+        if (_buffer) {
+            free(_buffer);
+            _buffer = nullptr;
+        }
+        _isCreated = false;
+        _w = 0;
+        _h = 0;
+    }
+
+    void* getPointer() { return (void*)_buffer; }
+    void* frameBuffer(int8_t f = 1) { (void)f; return (void*)_buffer; }
+
+    void fillSprite(uint16_t color) {
+        if (!_isCreated || !_buffer) return;
+        if (_bpp == 16) {
+            size_t count = (size_t)_w * _h;
+            uint16_t* b16 = (uint16_t*)_buffer;
+            for (size_t i = 0; i < count; i++) b16[i] = color;
+        } else if (_bpp == 8) {
+            uint8_t c8 = color565to332(color);
+            memset(_buffer, c8, (size_t)_w * _h);
+        } else {
+            uint8_t idx = _mapColorTo4Bit(color);
+            uint8_t doubleIdx = (idx << 4) | (idx & 0x0F);
+            memset(_buffer, doubleIdx, ((size_t)_w * _h + 1) / 2);
+        }
+    }
+
+    void fillScreen(uint16_t color) override {
+        fillSprite(color);
+    }
+
+    uint16_t readPixel(int32_t x, int32_t y) const override {
+        if (x < 0 || y < 0 || x >= _w || y >= _h || !_buffer) return 0;
+        if (_bpp == 16) {
+            return ((const uint16_t*)_buffer)[y * _w + x];
+        } else if (_bpp == 8) {
+            return color332to565(_buffer[y * _w + x]);
+        } else {
+            size_t byteIdx = ((size_t)y * _w + x) >> 1;
+            uint8_t idx = ((x & 1) == 0) ? (_buffer[byteIdx] >> 4) : (_buffer[byteIdx] & 0x0F);
+            return _palette[idx & 0x0F];
+        }
+    }
+
+    uint16_t readPixelValue(int32_t x, int32_t y) const {
+        if (x < 0 || y < 0 || x >= _w || y >= _h || !_buffer) return 0;
+        if (_bpp == 16) return ((const uint16_t*)_buffer)[y * _w + x];
+        if (_bpp == 8) return _buffer[y * _w + x];
+        size_t byteIdx = ((size_t)y * _w + x) >> 1;
+        return ((x & 1) == 0) ? (_buffer[byteIdx] >> 4) : (_buffer[byteIdx] & 0x0F);
+    }
+
+    void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data) override {
+        if (!_isCreated || !_buffer || !data || w <= 0 || h <= 0) return;
+        for (int32_t row = 0; row < h; row++) {
+            int32_t destY = y + row;
+            if (destY < 0 || destY >= _h) continue;
+            for (int32_t col = 0; col < w; col++) {
+                int32_t destX = x + col;
+                if (destX < 0 || destX >= _w) continue;
+                _pixel(destX, destY, data[row * w + col]);
+            }
+        }
+    }
+
+    void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t* data) override {
+        pushImage(x, y, w, h, (const uint16_t*)data);
+    }
+
+    void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data, uint16_t transparent) override {
+        if (!_isCreated || !_buffer || !data || w <= 0 || h <= 0) return;
+        for (int32_t row = 0; row < h; row++) {
+            int32_t destY = y + row;
+            if (destY < 0 || destY >= _h) continue;
+            for (int32_t col = 0; col < w; col++) {
+                int32_t destX = x + col;
+                if (destX < 0 || destX >= _w) continue;
+                uint16_t c = data[row * w + col];
+                if (c != transparent) _pixel(destX, destY, c);
+            }
+        }
+    }
+
+    void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t* data, uint16_t transparent) override {
+        pushImage(x, y, w, h, (const uint16_t*)data, transparent);
+    }
+
+    void pushSprite(int32_t x, int32_t y) {
+        if (!_isCreated || !_buffer) return;
+        if (_tft && _tft->isSprite()) {
+            pushToSprite((TFT_eSprite*)_tft, x, y);
+            return;
+        }
+#if defined(AMK_BACKEND_ESP32_S3)
+        if (_bpp == 16) {
+            display.pushImage(x, y, _w, _h, (const uint16_t*)_buffer);
+            return;
+        }
+#endif
+        int16_t sw = display.width(), sh = display.height();
+        if (x >= sw || y >= sh || x + _w <= 0 || y + _h <= 0) return;
+
+        alignas(4) static uint16_t _sprLineBuf[800];
+        for (int32_t row = 0; row < _h; row++) {
+            int32_t curY = y + row;
+            if (curY < 0 || curY >= sh) continue;
+
+            int32_t srcStartX = 0;
+            int32_t dstX = x;
+            int32_t curW = _w;
+            if (dstX < 0) {
+                srcStartX = -dstX;
+                curW += dstX;
+                dstX = 0;
+            }
+            if (dstX + curW > sw) curW = sw - dstX;
+            if (curW <= 0) continue;
+
+            display.waitFlush();
+            if (_bpp == 16) {
+                const uint16_t* src = ((const uint16_t*)_buffer) + (row * _w) + srcStartX;
+                for (int32_t i = 0; i < curW; i++) _sprLineBuf[i] = __builtin_bswap16(src[i]);
+            } else if (_bpp == 8) {
+                const uint8_t* src = _buffer + (row * _w) + srcStartX;
+                for (int32_t i = 0; i < curW; i++) {
+                    uint16_t c = color332to565(src[i]);
+                    _sprLineBuf[i] = __builtin_bswap16(c);
+                }
+            } else {
+                for (int32_t i = 0; i < curW; i++) {
+                    int32_t sprX = srcStartX + i;
+                    size_t byteIdx = ((size_t)row * _w + sprX) >> 1;
+                    uint8_t idx = ((sprX & 1) == 0) ? (_buffer[byteIdx] >> 4) : (_buffer[byteIdx] & 0x0F);
+                    uint16_t c = _palette[idx & 0x0F];
+                    _sprLineBuf[i] = __builtin_bswap16(c);
+                }
+            }
+            display.flushRegion(dstX, curY, dstX + curW - 1, curY, _sprLineBuf);
+        }
+        display.waitFlush();
+    }
+
+    void pushSprite(int32_t x, int32_t y, uint16_t transparent) {
+        if (!_isCreated || !_buffer) return;
+        if (_tft && _tft->isSprite()) {
+            pushToSprite((TFT_eSprite*)_tft, x, y, transparent);
+            return;
+        }
+        int16_t sw = display.width(), sh = display.height();
+        if (x >= sw || y >= sh || x + _w <= 0 || y + _h <= 0) return;
+
+        alignas(4) static uint16_t _transpLineBuf[800];
+        for (int32_t row = 0; row < _h; row++) {
+            int32_t curY = y + row;
+            if (curY < 0 || curY >= sh) continue;
+
+            int32_t runStart = -1;
+            int32_t runLen = 0;
+
+            for (int32_t col = 0; col < _w; col++) {
+                int32_t curX = x + col;
+                if (curX < 0 || curX >= sw) continue;
+
+                uint16_t c = readPixel(col, row);
+                if (c != transparent) {
+                    if (runStart < 0) {
+                        runStart = curX;
+                        runLen = 0;
+                    }
+                    _transpLineBuf[runLen++] = __builtin_bswap16(c);
+                } else {
+                    if (runStart >= 0) {
+                        display.waitFlush();
+                        display.flushRegion(runStart, curY, runStart + runLen - 1, curY, _transpLineBuf);
+                        runStart = -1;
+                        runLen = 0;
+                    }
+                }
+            }
+            if (runStart >= 0) {
+                display.waitFlush();
+                display.flushRegion(runStart, curY, runStart + runLen - 1, curY, _transpLineBuf);
+            }
+        }
+        display.waitFlush();
+    }
+
+    bool pushSprite(int32_t tx, int32_t ty, int32_t sx, int32_t sy, int32_t sw, int32_t sh) {
+        if (!_isCreated || !_buffer) return false;
+        if (sx < 0) { sw += sx; tx -= sx; sx = 0; }
+        if (sy < 0) { sh += sy; ty -= sy; sy = 0; }
+        if (sx + sw > _w)  sw = _w - sx;
+        if (sy + sh > _h)  sh = _h - sy;
+        if (sw <= 0 || sh <= 0) return false;
+
+        alignas(4) static uint16_t _subLineBuf[800];
+        int16_t dispW = display.width(), dispH = display.height();
+
+        for (int32_t row = 0; row < sh; row++) {
+            int32_t curDstY = ty + row;
+            int32_t curSrcY = sy + row;
+            if (curDstY < 0 || curDstY >= dispH) continue;
+
+            int32_t lineStartX = 0;
+            int32_t dstX = tx;
+            int32_t curW = sw;
+            if (dstX < 0) {
+                lineStartX = -dstX;
+                curW += dstX;
+                dstX = 0;
+            }
+            if (dstX + curW > dispW) curW = dispW - dstX;
+            if (curW <= 0) continue;
+
+            display.waitFlush();
+            for (int32_t i = 0; i < curW; i++) {
+                uint16_t c = readPixel(sx + lineStartX + i, curSrcY);
+                _subLineBuf[i] = __builtin_bswap16(c);
+            }
+            display.flushRegion(dstX, curDstY, dstX + curW - 1, curDstY, _subLineBuf);
+        }
+        display.waitFlush();
+        return true;
+    }
+
+    bool pushToSprite(TFT_eSprite* dspr, int32_t x, int32_t y) {
+        if (!dspr || !_isCreated || !_buffer || !dspr->created()) return false;
+        for (int32_t row = 0; row < _h; row++) {
+            int32_t dstY = y + row;
+            if (dstY < 0 || dstY >= dspr->height()) continue;
+            for (int32_t col = 0; col < _w; col++) {
+                int32_t dstX = x + col;
+                if (dstX < 0 || dstX >= dspr->width()) continue;
+                dspr->drawPixel(dstX, dstY, readPixel(col, row));
+            }
+        }
+        return true;
+    }
+
+    bool pushToSprite(TFT_eSprite* dspr, int32_t x, int32_t y, uint16_t transparent) {
+        if (!dspr || !_isCreated || !_buffer || !dspr->created()) return false;
+        for (int32_t row = 0; row < _h; row++) {
+            int32_t dstY = y + row;
+            if (dstY < 0 || dstY >= dspr->height()) continue;
+            for (int32_t col = 0; col < _w; col++) {
+                int32_t dstX = x + col;
+                if (dstX < 0 || dstX >= dspr->width()) continue;
+                uint16_t c = readPixel(col, row);
+                if (c != transparent) dspr->drawPixel(dstX, dstY, c);
+            }
+        }
+        return true;
+    }
+
+    bool pushRotated(int16_t angle, uint32_t transp = 0x00FFFFFF) {
+        if (!_isCreated || !_buffer) return false;
+        if (!_tft) return false;
+        return pushRotated(_tft, angle, transp);
+    }
+
+    bool pushRotated(TFT_eSPI* dst, int16_t angle, uint32_t transp = 0x00FFFFFF) {
+        if (!dst || !_isCreated || !_buffer) return false;
+        while (angle < 0) angle += 360;
+        angle = angle % 360;
+
+        float rad = angle * 0.0174532925f; // DEG_TO_RAD
+        float cosA = cosf(rad);
+        float sinA = sinf(rad);
+
+        int16_t srcPivotX = _pivotX;
+        int16_t srcPivotY = _pivotY;
+        int16_t dstPivotX = dst->getPivotX();
+        int16_t dstPivotY = dst->getPivotY();
+
+        float x0 = -srcPivotX,         y0 = -srcPivotY;
+        float x1 = _w - srcPivotX - 1, y1 = -srcPivotY;
+        float x2 = _w - srcPivotX - 1, y2 = _h - srcPivotY - 1;
+        float x3 = -srcPivotX,         y3 = _h - srcPivotY - 1;
+
+        float rx0 = x0 * cosA - y0 * sinA;
+        float ry0 = x0 * sinA + y0 * cosA;
+        float rx1 = x1 * cosA - y1 * sinA;
+        float ry1 = x1 * sinA + y1 * cosA;
+        float rx2 = x2 * cosA - y2 * sinA;
+        float ry2 = x2 * sinA + y2 * cosA;
+        float rx3 = x3 * cosA - y3 * sinA;
+        float ry3 = x3 * sinA + y3 * cosA;
+
+        float minX = std::min(std::min(rx0, rx1), std::min(rx2, rx3));
+        float maxX = std::max(std::max(rx0, rx1), std::max(rx2, rx3));
+        float minY = std::min(std::min(ry0, ry1), std::min(ry2, ry3));
+        float maxY = std::max(std::max(ry0, ry1), std::max(ry2, ry3));
+
+        int32_t startX = (int32_t)floorf(minX + dstPivotX);
+        int32_t endX   = (int32_t)ceilf(maxX + dstPivotX);
+        int32_t startY = (int32_t)floorf(minY + dstPivotY);
+        int32_t endY   = (int32_t)ceilf(maxY + dstPivotY);
+
+        int32_t dstW = dst->width();
+        int32_t dstH = dst->height();
+        if (startX < 0) startX = 0;
+        if (startY < 0) startY = 0;
+        if (endX >= dstW) endX = dstW - 1;
+        if (endY >= dstH) endY = dstH - 1;
+
+        for (int32_t dy = startY; dy <= endY; dy++) {
+            float dyDiff = dy - dstPivotY;
+            float baseSX = srcPivotX + dyDiff * sinA - dstPivotX * cosA;
+            float baseSY = srcPivotY + dyDiff * cosA + dstPivotX * sinA;
+
+            for (int32_t dx = startX; dx <= endX; dx++) {
+                int32_t sx = (int32_t)(baseSX + dx * cosA + 0.5f);
+                int32_t sy = (int32_t)(baseSY - dx * sinA + 0.5f);
+
+                if (sx >= 0 && sx < _w && sy >= 0 && sy < _h) {
+                    uint16_t c = readPixel(sx, sy);
+                    if (transp == 0x00FFFFFF || c != (uint16_t)transp) {
+                        dst->drawPixel(dx, dy, c);
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    void setRotation(uint8_t r) {
+        r = r & 3;
+        if (((_rotation & 1) != (r & 1)) && _isCreated) {
+            std::swap(_w, _h);
+            std::swap(_pivotX, _pivotY);
+        }
+        _rotation = r;
+    }
+    uint8_t getRotation() const { return _rotation; }
+
+    void scroll(int16_t dx, int16_t dy = 0) {
+        if (!_isCreated || !_buffer || (dx == 0 && dy == 0)) return;
+        if (_bpp == 16) {
+            uint16_t *buf = (uint16_t*)_buffer;
+            if (dy != 0) {
+                if (dy > 0) {
+                    for (int32_t y = _h - 1; y >= dy; y--)
+                        memcpy(&buf[y * _w], &buf[(y - dy) * _w], _w * 2);
+                    for (int32_t y = 0; y < dy; y++)
+                        memset(&buf[y * _w], 0, _w * 2);
+                } else {
+                    for (int32_t y = 0; y < _h + dy; y++)
+                        memcpy(&buf[y * _w], &buf[(y - dy) * _w], _w * 2);
+                    for (int32_t y = _h + dy; y < _h; y++)
+                        memset(&buf[y * _w], 0, _w * 2);
+                }
+            }
+            if (dx != 0) {
+                for (int32_t y = 0; y < _h; y++) {
+                    uint16_t *row = &buf[y * _w];
+                    if (dx > 0) {
+                        memmove(&row[dx], &row[0], (_w - dx) * 2);
+                        memset(&row[0], 0, dx * 2);
+                    } else {
+                        memmove(&row[0], &row[-dx], (_w + dx) * 2);
+                        memset(&row[_w + dx], 0, (-dx) * 2);
+                    }
+                }
+            }
+        } else if (_bpp == 8) {
+            if (dy != 0) {
+                if (dy > 0) {
+                    for (int32_t y = _h - 1; y >= dy; y--)
+                        memcpy(&_buffer[y * _w], &_buffer[(y - dy) * _w], _w);
+                    for (int32_t y = 0; y < dy; y++)
+                        memset(&_buffer[y * _w], 0, _w);
+                } else {
+                    for (int32_t y = 0; y < _h + dy; y++)
+                        memcpy(&_buffer[y * _w], &_buffer[(y - dy) * _w], _w);
+                    for (int32_t y = _h + dy; y < _h; y++)
+                        memset(&_buffer[y * _w], 0, _w);
+                }
+            }
+            if (dx != 0) {
+                for (int32_t y = 0; y < _h; y++) {
+                    uint8_t *row = &_buffer[y * _w];
+                    if (dx > 0) {
+                        memmove(&row[dx], &row[0], _w - dx);
+                        memset(&row[0], 0, dx);
+                    } else {
+                        memmove(&row[0], &row[-dx], _w + dx);
+                        memset(&row[_w + dx], 0, -dx);
+                    }
+                }
+            }
+        }
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TFT_eSPI_Button - Drop-in UI button helper compatible with Bodmer's TFT_eSPI
+// ═══════════════════════════════════════════════════════════════════════════════
+class TFT_eSPI_Button {
+ public:
+  TFT_eSPI_Button(void) {
+    _gfx = nullptr;
+    _x1 = 0;
+    _y1 = 0;
+    _w = 0;
+    _h = 0;
+    _outlinecolor = 0;
+    _fillcolor = 0;
+    _textcolor = 0;
+    _textsize = 1;
+    _xd = 0;
+    _yd = 0;
+    _datum = MC_DATUM;
+    currstate = false;
+    laststate = false;
+    _label[0] = '\0';
+  }
+
+  // Classic initButton() uses center (x, y) & size (w, h)
+  void initButton(TFT_eSPI *gfx, int16_t x, int16_t y,
+                  uint16_t w, uint16_t h, uint16_t outline, uint16_t fill,
+                  uint16_t textcolor, char *label, uint8_t textsize) {
+    _x1           = x - (w / 2);
+    _y1           = y - (h / 2);
+    _w            = w;
+    _h            = h;
+    _outlinecolor = outline;
+    _fillcolor    = fill;
+    _textcolor    = textcolor;
+    _textsize     = textsize;
+    _gfx          = gfx;
+    strncpy(_label, label, 9);
+    _label[9] = '\0';
+  }
+
+  // String version of initButton()
+  void initButton(TFT_eSPI *gfx, int16_t x, int16_t y,
+                  uint16_t w, uint16_t h, uint16_t outline, uint16_t fill,
+                  uint16_t textcolor, const String &label, uint8_t textsize) {
+    initButton(gfx, x, y, w, h, outline, fill, textcolor, (char*)label.c_str(), textsize);
+  }
+
+  // initButtonUL() uses upper-left corner (x1, y1) & size (w, h)
+  void initButtonUL(TFT_eSPI *gfx, int16_t x1, int16_t y1,
+                    uint16_t w, uint16_t h, uint16_t outline, uint16_t fill,
+                    uint16_t textcolor, char *label, uint8_t textsize) {
+    _x1           = x1;
+    _y1           = y1;
+    _w            = w;
+    _h            = h;
+    _outlinecolor = outline;
+    _fillcolor    = fill;
+    _textcolor    = textcolor;
+    _textsize     = textsize;
+    _gfx          = gfx;
+    strncpy(_label, label, 9);
+    _label[9] = '\0';
+  }
+
+  // String version of initButtonUL()
+  void initButtonUL(TFT_eSPI *gfx, int16_t x1, int16_t y1,
+                    uint16_t w, uint16_t h, uint16_t outline, uint16_t fill,
+                    uint16_t textcolor, const String &label, uint8_t textsize) {
+    initButtonUL(gfx, x1, y1, w, h, outline, fill, textcolor, (char*)label.c_str(), textsize);
+  }
+
+  void setLabelDatum(int16_t x_delta, int16_t y_delta, uint8_t datum = MC_DATUM) {
+    _xd = x_delta;
+    _yd = y_delta;
+    _datum = datum;
+  }
+
+  void drawButton(bool inverted = false, String long_name = "") {
+    if (!_gfx) return;
+    uint16_t fill, outline, text;
+
+    if (!inverted) {
+      fill    = _fillcolor;
+      outline = _outlinecolor;
+      text    = _textcolor;
+    } else {
+      fill    = _textcolor;
+      outline = _outlinecolor;
+      text    = _fillcolor;
+    }
+
+    uint8_t r = min(_w, _h) / 4;
+    _gfx->fillRoundRect(_x1, _y1, _w, _h, r, fill);
+    _gfx->drawRoundRect(_x1, _y1, _w, _h, r, outline);
+
+    uint8_t tempdatum = _gfx->getTextDatum();
+    uint16_t temppad  = _gfx->getTextPadding();
+
+    _gfx->setTextColor(text, fill);
+    _gfx->setTextSize(_textsize);
+    _gfx->setTextDatum(_datum);
+    _gfx->setTextPadding(0);
+
+    int16_t xc = _x1 + (_w / 2) + _xd;
+    int16_t yc = _y1 + (_h / 2) + _yd;
+
+    if (long_name.length() > 0) {
+      _gfx->drawString(long_name, xc, yc);
+    } else {
+      _gfx->drawString(_label, xc, yc);
+    }
+
+    _gfx->setTextDatum(tempdatum);
+    _gfx->setTextPadding(temppad);
+  }
+
+  bool contains(int16_t x, int16_t y) {
+    return ((x >= _x1) && (x < (_x1 + _w)) && (y >= _y1) && (y < (_y1 + _h)));
+  }
+
+  void press(bool p) {
+    laststate = currstate;
+    currstate = p;
+  }
+
+  bool isPressed() { return currstate; }
+  bool justPressed() { return (currstate && !laststate); }
+  bool justReleased() { return (!currstate && laststate); }
+
+ private:
+  TFT_eSPI *_gfx;
+  int16_t  _x1, _y1; // Coordinates of top-left corner
+  uint16_t _w, _h;
+  uint8_t  _textsize;
+  uint16_t _outlinecolor, _fillcolor, _textcolor;
+  char     _label[10];
+  int16_t  _xd, _yd;
+  uint8_t  _datum;
+  bool     currstate, laststate;
+};
+
+
+#include "AMK_Image_Decoder.h"
+
+#endif // AMK_CYD_UNIVERSAL_TFT_H
