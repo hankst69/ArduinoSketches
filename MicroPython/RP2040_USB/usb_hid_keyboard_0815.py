@@ -48,14 +48,16 @@ class Usb0815Keyboard(KeyboardInterface):
 
 
 class AutoKeyboard():
-    def __init__(self, led_pin_nr):
-        self.led_pin = Pin(led_pin_nr, Pin.OUT)
-        self.led_pin.value(1)  #led off means to set output to high
-
-    def led_flash(self):
+    def led_on(self):
         self.led_pin.value(0)  #led on means to set output to low
-        time.sleep_ms(5)
+      
+    def led_off(self):
         self.led_pin.value(1)  #led off means to set output to high
+  
+    def led_flash(self):
+        self.led_on()
+        time.sleep_ms(5)
+        self.led_off()
 
     def led_flash_3times_and_wait(self):
         self.led_flash()
@@ -64,6 +66,10 @@ class AutoKeyboard():
         time.sleep_ms(500)
         self.led_flash()
         time.sleep_ms(5000)
+
+    def __init__(self, led_pin_nr):
+        self.led_pin = Pin(led_pin_nr, Pin.OUT)
+        self.led_off()
 
     def run(self):
         print("")
@@ -91,14 +97,14 @@ class AutoKeyboard():
         if k.is_open():
             for i in range(6):
                 time.sleep_ms(2000)
-                #k.send_keys(keys)
+                #k.send_keys(keys) #this seems not to work?
                 for key in keys:
                     k.send_keys([key])
                     self.led_flash()
                 k.send_keys([])
 
         # Stopping
-        k.send_keys([]dev.active(False)
+        k.send_keys([])
         #dev.active(False)
         self.led_flash_3times_and_wait()
 

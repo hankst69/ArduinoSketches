@@ -48,19 +48,15 @@ class Usb0815Keyboard(KeyboardInterface):
 
 
 class AutoKeyboard():
-    def __init__(self, led_pin_nr):
-        self.led_pin = Pin(led_pin_nr, Pin.OUT)
-        self.led_off()
-
     def led_on(self):
         self.led_pin.value(0)  #led on means to set output to low
       
     def led_off(self):
         self.led_pin.value(1)  #led off means to set output to high
-
+  
     def led_flash(self):
         self.led_on()
-        time.sleep_ms(10)
+        time.sleep_ms(5)
         self.led_off()
 
     def led_flash_3times_and_wait(self):
@@ -71,20 +67,22 @@ class AutoKeyboard():
         self.led_flash()
         time.sleep_ms(5000)
 
+    def __init__(self, led_pin_nr):
+        self.led_pin = Pin(led_pin_nr, Pin.OUT)
+        self.led_off()
+
     def run(self):
         print("")
-    
         print("Registering keyboard class...")
-        #self.led_flash_3times_and_wait()
       
         # Register the keyboard interface and re-enumerate
         #k = Usb0815Keyboard(led)
         k = KeyboardInterface()
-        print("Init keyboard...")
-        usb.device.get().init(k, builtin_driver=True)
-        print("Opening keyboard...")
-        #self.led_flash_3times_and_wait()
 
+        # see: https://github.com/micropython/micropython-lib/blob/master/micropython/usb/usb-device/usb/device/core.py
+        dev = usb.device.get()
+        dev.init(k, builtin_driver=True)
+    
         while not k.is_open():
             print("Opening keyboard...")
             #self.led_flash()
@@ -92,19 +90,24 @@ class AutoKeyboard():
     
         print("Entering keyboard loop...")
         self.led_flash_3times_and_wait()
-    
-        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER]
-        # print(keys)
+
+        # see: https://github.com/micropython/micropython-lib/blob/master/micropython/usb/usb-device-keyboard/usb/device/keyboard.py
+        keys = [KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.N0, KeyCode.N8, KeyCode.N1, KeyCode.N5, KeyCode.ENTER, KeyCode.ESCAPE]
       
         if k.is_open():
-            for i in range(10):
+            for i in range(6):
                 time.sleep_ms(2000)
-                k.send_keys(keys)
-                self.led_flash()
+                #k.send_keys(keys) #this seems not to work?
+                for key in keys:
+                    k.send_keys([key])
+                    self.led_flash()
+                k.send_keys([])
 
+        # Stopping
+        k.send_keys([])
+        #dev.active(False)
         self.led_flash_3times_and_wait()
 
 
 app = AutoKeyboard(ONBOARD_LED_PIN)
 app.run()
-
