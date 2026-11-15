@@ -50,12 +50,18 @@ class Usb0815Keyboard(KeyboardInterface):
 class AutoKeyboard():
     def __init__(self, led_pin_nr):
         self.led_pin = Pin(led_pin_nr, Pin.OUT)
+        self.led_off()
+
+    def led_on(self):
+        self.led_pin.value(0)  #led on means to set output to low
+      
+    def led_off(self):
         self.led_pin.value(1)  #led off means to set output to high
 
     def led_flash(self):
-        self.led_pin.value(0)  #led on means to set output to low
+        self.led_on()
         time.sleep_ms(10)
-        self.led_pin.value(1)  #led off means to set output to high
+        self.led_off()
 
     def led_flash_3times_and_wait(self):
         self.led_flash()
@@ -74,9 +80,11 @@ class AutoKeyboard():
         # Register the keyboard interface and re-enumerate
         #k = Usb0815Keyboard(led)
         k = KeyboardInterface()
+        print("Init keyboard...")
         usb.device.get().init(k, builtin_driver=True)
-    
+        print("Opening keyboard...")
         #self.led_flash_3times_and_wait()
+
         while not k.is_open():
             print("Opening keyboard...")
             #self.led_flash()
