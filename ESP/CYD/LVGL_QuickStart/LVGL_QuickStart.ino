@@ -10,7 +10,6 @@
 #include <lvgl.h>
 #include <AMK_CYD_Universal_TFT.h>
 #include <AMK_CYD_LVGL.h>
-//#include "SafeString.h"
 
 AMK_display display;
 AMK_touch   touch;
