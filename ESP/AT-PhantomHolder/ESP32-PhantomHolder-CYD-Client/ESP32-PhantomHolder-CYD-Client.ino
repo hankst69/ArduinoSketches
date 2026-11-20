@@ -9,6 +9,9 @@ const char* at_mqtt_topic_servo_y_deg    = "wfauto/Ser2"; //payload = 110 -> Y f
 const char* at_mqtt_topic_servo_rot_deg  = "wfauto/Ser3"; //payload =  80 -> Rotation fährt auf 80° (begrenzt auf 60-120°)
 const char* at_mqtt_topic_servo_tilt_deg = "wfauto/Ser4"; //payload = 130 -> Tilt fährt auf 130° (begrenzt auf 90-150°)
 
+const char* at_mqtt_info_name       = "AT-PhantomHolder connecting";
+const char* at_mqtt_info_connecting = "AT-PhantomHolder connecting";
+const char* at_mqtt_info_connected  = "AT-PhantomHolder CONNECTED";
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -18,6 +21,9 @@ AMK_display     display;
 AMK_touch       touch;
 TFT_eSPI        tft;
 AMK_CYD_LVGL    lvgl;
+
+lv_obj_t *lvgl_title;
+int mqtt_connect_try = 0;
 
 /*
 #if defined(ESP32)
@@ -35,7 +41,7 @@ WiFiClientSecure net;
 #endif
 */
 #include <AViShaMQTT.h>
-AViShaMQTT mqtt(ssid, password, mqtt_server, mqtt_port /*,net*/);
+AViShaMQTT  mqtt(ssid, password, mqtt_server, mqtt_port /*,net*/);
 
 // demo: sample MQTT topics
 //const char* topicLED = "test/topic/led";
@@ -46,17 +52,32 @@ AViShaMQTT mqtt(ssid, password, mqtt_server, mqtt_port /*,net*/);
 
 
 void setup_mqtt() {
+}
+
+bool connect_mqtt() {
+
+    if (mqtt.isConnected()) {
+        return true;
+    }
+
+    Serial.print("[APP]: Connecting to MQTT broker");
     if (!mqtt.begin()) {
       Serial.print("[APP]: Connection failed, state: ");
       Serial.println(mqtt.state());
-      while (1) delay(1000);
+      return false;
     }
+
+    if (!mqtt.isConnected()) {
+        return false;
+    }
+    Serial.print("[APP]: Connected");
 
     // demo: subscribe MQTT topics
     //mqtt.subscribe(topicLED, 1); // QoS 1
 
     // todo:
     // subscribe here also AT-Servor-Prooject MQTT-Topics (once there are ones)
+    return true;
 }
 
 
@@ -166,9 +187,9 @@ void setup_ui() {
     lv_obj_t * scr = lv_scr_act();
 
     // Header Label
-    lv_obj_t * title = lv_label_create(scr);
-    lv_label_set_text(title, "AMK_CYD Universal - LVGL Demo");
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
+    lvgl_title = lv_label_create(scr);
+    lv_label_set_text(lvgl_title, at_mqtt_info_name);
+    lv_obj_align(lvgl_title, LV_ALIGN_TOP_MID, 0, 5);
 
     // Layout (320x240 landscape):
     //  left : Y slider (vertical) with Y- (bottom) / Y+ (top) buttons
@@ -216,6 +237,24 @@ void setup() {
 
 void loop() {
     lvgl.tick(); // Process LVGL timers, animations & touch events
+
+    if (!connect_mqtt()) {
+        mqtt_connect_try += 1;
+        mqtt_connect_try = mqtt_connect_try % 4;
+        String progress = "|";
+        switch (mqtt_connect_try) {
+            case 1: progress = "/"; break;
+            case 2: progress = "--"; break;
+            case 3: progress = "\\"; break;
+        }
+        String title = at_mqtt_info_connecting;
+        title = title + " " + progress;
+        lv_label_set_text(lvgl_title, title.c_str());
+        delay(500);
+        return;
+    }
+    lv_label_set_text(lvgl_title, at_mqtt_info_connected);
+
     mqtt.loop(); // Process MQTT
 
     // demo: publish simulated MQTT events
