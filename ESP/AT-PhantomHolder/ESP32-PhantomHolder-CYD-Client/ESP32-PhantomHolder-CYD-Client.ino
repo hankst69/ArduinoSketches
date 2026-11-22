@@ -9,9 +9,9 @@ const char* at_mqtt_topic_servo_y_deg    = "wfauto/Ser2"; //payload = 110 -> Y f
 const char* at_mqtt_topic_servo_rot_deg  = "wfauto/Ser3"; //payload =  80 -> Rotation fährt auf 80° (begrenzt auf 60-120°)
 const char* at_mqtt_topic_servo_tilt_deg = "wfauto/Ser4"; //payload = 130 -> Tilt fährt auf 130° (begrenzt auf 90-150°)
 
-const char* at_mqtt_info_name       = "AT-PhantomHolder connecting";
+const char* at_mqtt_info_name       = "AT-PhantomHolder ---";
 const char* at_mqtt_info_connecting = "AT-PhantomHolder connecting";
-const char* at_mqtt_info_connected  = "AT-PhantomHolder CONNECTED";
+const char* at_mqtt_info_connected  = "AT-PhantomHolder ONLINE";
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -241,8 +241,9 @@ void loop() {
     if (!connect_mqtt()) {
         mqtt_connect_try += 1;
         mqtt_connect_try = mqtt_connect_try % 4;
-        String progress = "|";
+        String progress = "";
         switch (mqtt_connect_try) {
+            case 0: progress = "|"; break;
             case 1: progress = "/"; break;
             case 2: progress = "--"; break;
             case 3: progress = "\\"; break;
@@ -250,7 +251,7 @@ void loop() {
         String title = at_mqtt_info_connecting;
         title = title + " " + progress;
         lv_label_set_text(lvgl_title, title.c_str());
-        delay(500);
+        delay(50);
         return;
     }
     lv_label_set_text(lvgl_title, at_mqtt_info_connected);
